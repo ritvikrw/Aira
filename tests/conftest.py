@@ -1,11 +1,11 @@
 """
 Shared pytest configuration.
-Stubs livekit before any test module is imported so all test files share
-the same mock objects and there are no sys.modules conflicts.
+Stubs livekit and heavy API dependencies before any test module is imported
+so all test files share the same mock objects and there are no sys.modules conflicts.
 """
 import sys
 import os
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 
 # Add voice_agent to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend', 'voice_agent'))
@@ -40,7 +40,8 @@ class FakeTTSBase:
     def __init__(self, capabilities=None, sample_rate=22050, num_channels=1): pass
 
 class FakeChunkedStream:
-    def __init__(self, *, tts, input_text, conn_options): pass
+    def __init__(self, *, tts, input_text, conn_options):
+        self._input_text = input_text
 
 # ── Build stubs ───────────────────────────────────────────────────────────────
 lk_stt_mock = MagicMock(name="livekit.agents.stt")
@@ -69,6 +70,19 @@ lk_agents_mock.stt     = lk_stt_mock
 lk_agents_mock.tts     = lk_tts_mock
 lk_agents_mock.utils   = lk_utils_mock
 lk_agents_mock.types   = lk_types_mock
+# Make function_tool a pass-through decorator so decorated functions remain callable
+lk_agents_mock.function_tool = lambda f: f
+lk_agents_mock.RunContext = type("RunContext", (), {})
+
+# Make Agent a real inheritable class
+class FakeAgent:
+    def __init__(self, instructions="", tools=None, **kwargs):
+        self.instructions = instructions
+        self.tools = tools or []
+        self.session = MagicMock()
+        self.session.say = MagicMock()
+
+lk_agents_mock.Agent = FakeAgent
 
 # Register everything (force-set, not setdefault, so this file always wins)
 sys.modules["livekit"]              = MagicMock()
@@ -78,6 +92,25 @@ sys.modules["livekit.agents.stt"]   = lk_stt_mock
 sys.modules["livekit.agents.tts"]   = lk_tts_mock
 sys.modules["livekit.agents.utils"] = lk_utils_mock
 sys.modules["livekit.agents.types"] = lk_types_mock
+
+# ── Stub API service dependencies so routes can be imported without real backends ──
+_mock_summarizer = MagicMock()
+_mock_summarizer.summarize_call = AsyncMock(return_value={
+    "summary_text": "Test summary",
+    "key_topics": ["topic1"],
+    "action_items": [],
+    "call_category": "Other",
+})
+sys.modules["services.summarizer"] = _mock_summarizer
+
+# Stub langchain so API routes can import ingestion without real langchain installed
+_lc_community_stub = MagicMock()
+sys.modules.setdefault("langchain_community", _lc_community_stub)
+sys.modules.setdefault("langchain_community.document_loaders", _lc_community_stub.document_loaders)
+sys.modules.setdefault("langchain_text_splitters", MagicMock())
+
+# Stub dotenv so it doesn't fail in CI
+sys.modules.setdefault("dotenv", MagicMock())
 
 # Expose so test files can import from conftest
 __all__ = [

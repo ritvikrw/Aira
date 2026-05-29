@@ -18,7 +18,6 @@ from typing import Optional
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
-# Define a simplified Base that SQLite can handle (no ARRAY columns)
 class TestBase(DeclarativeBase):
     pass
 
@@ -50,46 +49,10 @@ class CallSummaryTest(TestBase):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(64))
     summary_text: Mapped[str] = mapped_column(Text)
-    key_topics: Mapped[Optional[str]] = mapped_column(Text)  # JSON string instead of ARRAY
-    action_items: Mapped[Optional[str]] = mapped_column(Text)  # JSON string instead of ARRAY
+    key_topics: Mapped[Optional[str]] = mapped_column(Text)
+    action_items: Mapped[Optional[str]] = mapped_column(Text)
     call_category: Mapped[Optional[str]] = mapped_column(String(64))
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
-
-
-def make_app(db_session):
-    """Create a FastAPI app with mocked dependencies."""
-    # Mock summarizer before importing routes
-    mock_summarizer = MagicMock()
-    mock_summarizer.summarize_call = AsyncMock(return_value={
-        "summary_text": "Test summary",
-        "key_topics": ["topic1"],
-        "action_items": [],
-        "call_category": "Other",
-    })
-
-    with patch.dict('sys.modules', {
-        'services.summarizer': mock_summarizer,
-        'dotenv': MagicMock(),
-    }):
-        # Patch environment to avoid OpenAI key issues
-        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key-unused'}):
-            from fastapi import FastAPI
-            import importlib
-            # Re-import to get mocked version
-            if 'routes.calls' in sys.modules:
-                del sys.modules['routes.calls']
-
-            from database import get_db
-            from routes.calls import router
-
-            app = FastAPI()
-            app.include_router(router)
-
-            async def override_db():
-                yield db_session
-
-            app.dependency_overrides[get_db] = override_db
-            return app
 
 
 @pytest.fixture(scope="module")
@@ -116,34 +79,20 @@ def client(db_session):
     """Create TestClient with overridden DB."""
     from fastapi.testclient import TestClient
     from fastapi import FastAPI
-    from unittest.mock import MagicMock, AsyncMock, patch
 
-    mock_summarizer = MagicMock()
-    mock_summarizer.summarize_call = AsyncMock(return_value={
-        "summary_text": "Test",
-        "key_topics": [],
-        "action_items": [],
-        "call_category": "Other",
-    })
+    from database import get_db
+    from routes.calls import router
 
-    with patch.dict('sys.modules', {'services.summarizer': mock_summarizer}):
-        with patch.dict(os.environ, {'OPENAI_API_KEY': 'fake'}):
-            if 'routes.calls' in sys.modules:
-                del sys.modules['routes.calls']
+    app = FastAPI()
+    app.include_router(router)
 
-            from database import get_db
-            from routes.calls import router
+    async def override():
+        yield db_session
 
-            app = FastAPI()
-            app.include_router(router)
+    app.dependency_overrides[get_db] = override
 
-            async def override():
-                yield db_session
-
-            app.dependency_overrides[get_db] = override
-
-            with TestClient(app, raise_server_exceptions=True) as c:
-                yield c
+    with TestClient(app, raise_server_exceptions=True) as c:
+        yield c
 
 
 def test_create_call(client):
@@ -165,7 +114,6 @@ def test_create_call_existing_returns_existing(client):
 
 def test_end_call(client):
     """POST /calls/{id}/end marks call as ended (new session without prior start)."""
-    # When no call exists, the endpoint creates an ended call with no duration
     resp = client.post("/calls/brand-new-sess-end/end")
     assert resp.status_code == 200
     data = resp.json()

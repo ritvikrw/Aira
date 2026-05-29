@@ -1,0 +1,12 @@
+[run]
+source =
+    backend/api
+    backend/voice_agent
+omit =
+    */migrations/*
+    */__pycache__/*
+    */tests/*
+
+[report]
+show_missing = True
+skip_covered = False
