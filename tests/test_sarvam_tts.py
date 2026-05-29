@@ -26,7 +26,7 @@ def test_detect_script_language_telugu():
 def test_detect_script_language_hindi():
     """_detect_script_language detects Hindi/Devanagari script."""
     from sarvam_tts import _detect_script_language
-    assert _detect_script_language("నమస్తే") == "te-IN"
+    assert _detect_script_language("नमस्ते") == "hi-IN"
 
 
 def test_detect_script_language_devanagari():

@@ -45,8 +45,11 @@ jobs:
           python-version: '3.12'
 
       - name: Install backend dependencies
-        working-directory: backend/api
-        run: pip install -r requirements.txt pytest pytest-asyncio pytest-cov
+        run: |
+          pip install -r backend/api/requirements.txt \
+            pytest pytest-asyncio pytest-cov \
+            aiosqlite numpy \
+            "livekit-agents>=0.12,<1.0"
 
       - name: Run backend tests with coverage
         run: |
