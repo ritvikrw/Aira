@@ -195,17 +195,12 @@ async def test_translate_text_error():
 def test_get_chunks_by_language():
     mock_store = MagicMock()
     mock_store._collection.get.return_value = {"documents": ["chunk1", "chunk2"]}
-    with patch('routes.knowledge_base.get_vector_store', return_value=mock_store):
-        result = asyncio.get_event_loop().run_until_complete(
-            get_chunks_by_language.__wrapped__(language="en")
-        ) if hasattr(get_chunks_by_language, '__wrapped__') else None
 
-    # Direct sync test for the sync-compatible path
+    async def _run():
+        return await get_chunks_by_language(language="en")
+
     with patch('routes.knowledge_base.get_vector_store', return_value=mock_store):
-        import asyncio as _asyncio
-        async def _run():
-            return await get_chunks_by_language(language="en")
-        result = _asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
     assert result["language"] == "en"
     assert result["count"] == 2
 
