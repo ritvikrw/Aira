@@ -1,0 +1,13 @@
+python-dotenv==1.0.1
+httpx>=0.28.1
+
+# LiveKit
+livekit-agents[turn-detector]>=1.3,<2.0
+livekit-plugins-deepgram>=0.6
+livekit-plugins-elevenlabs>=0.3
+livekit-plugins-openai>=0.5
+livekit-plugins-silero>=0.7
+
+# LangChain (for KB search tool)
+langchain>=0.3.7
+langchain-openai>=0.2.9

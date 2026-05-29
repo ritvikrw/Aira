@@ -1,0 +1,64 @@
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --dev --bind 0.0.0.0 --node-ip 127.0.0.1
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: recep
+      POSTGRES_PASSWORD: recep
+      POSTGRES_DB: recep
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recep"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://recep:recep@postgres:5432/recep
+      DATABASE_URL_SYNC: postgresql://recep:recep@postgres:5432/recep
+      CHROMA_PERSIST_PATH: /data/chroma
+      UPLOAD_DIR: /data/uploads
+      API_PORT: "8001"
+    volumes:
+      - chroma_data:/data/chroma
+      - upload_data:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  voice_agent:
+    build:
+      context: ./voice_agent
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+      API_BASE_URL: http://api:8001
+      API_PORT: "8001"
+    depends_on:
+      - livekit
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  chroma_data:
+  upload_data:
