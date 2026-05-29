@@ -48,8 +48,7 @@ jobs:
         run: |
           pip install -r backend/api/requirements.txt \
             pytest pytest-asyncio pytest-cov \
-            aiosqlite numpy \
-            "livekit-agents>=0.12,<1.0"
+            aiosqlite numpy httpx
 
       - name: Run backend tests with coverage
         run: |
