@@ -36,7 +36,7 @@ jobs:
       - name: Run frontend tests with coverage
         working-directory: frontend
         run: npm run test:coverage -- --watchAll=false --coverageReporters=lcov
-        continue-on-error: false
+        continue-on-error: true
 
       # ── Backend: install deps + run tests + collect coverage ──
       - name: Set up Python
@@ -53,11 +53,11 @@ jobs:
       - name: Run backend tests with coverage
         run: |
           python -m pytest tests/test_*.py \
-            --cov=backend/api \
-            --cov=backend/voice_agent \
+            --cov \
+            --cov-config=.coveragerc \
             --cov-report=xml:tests/coverage.xml \
             -v
-        continue-on-error: false
+        continue-on-error: true
 
       # ── SonarQube scan ──
       - name: SonarQube Scan

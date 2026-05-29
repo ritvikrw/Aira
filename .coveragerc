@@ -1,11 +1,14 @@
 [run]
-source =
-    backend/api
-    backend/voice_agent
+source = .
+include =
+    backend/api/*
+    backend/api/**/*
+    backend/voice_agent/*
 omit =
     */migrations/*
     */__pycache__/*
-    */tests/*
+    tests/*
+    */node_modules/*
 
 [report]
 show_missing = True
