@@ -8,7 +8,7 @@ from livekit.agents import Agent
 
 _api_client = httpx.AsyncClient(timeout=5.0)
 
-from prompts import build_system_prompt, build_locked_prompt
+from prompts import build_prompt
 from tools import _persist_caller_name, search_knowledge_base
 
 
@@ -92,7 +92,7 @@ class ReceptionistAgent(Agent):
     def __init__(self, session_id, agent_name="aira", org_name="",
                  org_description="", instructions="", default_language="en-IN"):
         super().__init__(
-            instructions=build_system_prompt(agent_name, org_name, org_description, instructions, default_language),
+            instructions=build_prompt(agent_name, org_name, default_language, org_description, instructions),
             tools=[search_knowledge_base],
         )
         self._session_id        = session_id
@@ -238,10 +238,10 @@ class ReceptionistAgent(Agent):
         logger.info("Language locked: %s", lang)
         # Update agent instructions so LLM uses language-specific prompt from this turn on
         try:
-            focused = build_locked_prompt(
+            focused = build_prompt(
                 self._agent_name, self._org_name,
-                self._org_description, self._instructions_str,
                 lang,
+                self._org_description, self._instructions_str,
             )
             await self.update_instructions(focused)
             logger.info("Instructions updated for %s (%d chars)", lang, len(focused))
