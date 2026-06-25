@@ -7,7 +7,21 @@ from livekit.agents import function_tool, RunContext  # function_tool used by se
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-_api_client = httpx.AsyncClient(timeout=5.0)
+_api_client = httpx.AsyncClient(timeout=15.0)
+
+# Max chars of KB text to inject per search — keeps it to ~150 tokens
+# enough for the LLM to answer, not so much it bloats conversation history
+_KB_MAX_CHARS = 600
+_KB_FILLERS = ["Sure, let me check...", "One moment...", "Got it, checking...", "Let me look that up..."]
+_kb_filler_index = 0
+
+
+def _trim_kb(docs: list[str]) -> str:
+    """Join KB chunks and trim to _KB_MAX_CHARS to limit tokens in history."""
+    joined = "\n---\n".join(docs)
+    if len(joined) > _KB_MAX_CHARS:
+        return joined[:_KB_MAX_CHARS] + "…"
+    return joined
 
 # Sarvam language code → short tag used in ChromaDB
 _LANG_TO_SHORT: dict[str, str] = {
@@ -29,8 +43,22 @@ async def _persist_caller_name(session_id: str, name: str) -> None:
         logger.warning("Failed to save caller name: %s", e)
 
 
+async def _kb_query(payload: dict) -> list[str]:
+    """Single KB search request. Returns documents list or empty list on failure."""
+    try:
+        r = await _api_client.post(
+            f"{API_BASE_URL}/knowledge-base/search",
+            json=payload,
+            timeout=15.0,
+        )
+        r.raise_for_status()
+        return r.json().get("documents", [])
+    except Exception:
+        return []
+
+
 @function_tool
-async def search_knowledge_base(context: RunContext, query: str) -> str:
+async def search_knowledge_base(context: RunContext, query: str) -> str:  # noqa: C901
     """Search the company knowledge base to answer caller questions.
 
     Use this whenever the caller asks about company info, services, pricing,
@@ -39,7 +67,17 @@ async def search_knowledge_base(context: RunContext, query: str) -> str:
     Args:
         query: The caller's question or a search phrase derived from it.
     """
-    # Search in the caller's detected language first, fall back to English
+    # Play a rotating filler immediately — KB search takes ~1-2s and we need to cover the silence
+    global _kb_filler_index
+    try:
+        session = getattr(context, "session", None)
+        if session:
+            phrase = _KB_FILLERS[_kb_filler_index % len(_KB_FILLERS)]
+            _kb_filler_index += 1
+            asyncio.create_task(session.say(phrase, add_to_chat_ctx=False))
+    except Exception:
+        pass
+
     try:
         from sarvam_stt import detected_language
         lang = _LANG_TO_SHORT.get(detected_language, "en")
@@ -47,26 +85,23 @@ async def search_knowledge_base(context: RunContext, query: str) -> str:
         lang = "en"
 
     try:
-        # Sequential fallback: language-specific → English → unfiltered.
-        # Local embeddings are ~50 ms so sequential is fast and avoids wasteful parallel calls.
-        payloads: list[dict] = [{"query": query, "k": 4, "language": lang}]
+        # Fire language-specific and English queries in parallel to halve latency.
+        # For English callers both queries are identical — deduplication is harmless.
+        payloads: list[dict] = [{"query": query, "k": 2, "language": lang}]
         if lang != "en":
-            payloads.append({"query": query, "k": 4, "language": "en"})
-        payloads.append({"query": query, "k": 4})
+            payloads.append({"query": query, "k": 2, "language": "en"})
 
-        for payload in payloads:
-            try:
-                r = await _api_client.post(
-                    f"{API_BASE_URL}/knowledge-base/search",
-                    json=payload,
-                    timeout=5.0,
-                )
-                r.raise_for_status()
-                docs = r.json().get("documents", [])
-                if docs:
-                    return "\n---\n".join(docs)
-            except Exception:
-                continue
+        results = await asyncio.gather(*[_kb_query(p) for p in payloads])
+
+        # Return first non-empty result; fall back to unfiltered search if both empty
+        for docs in results:
+            if docs:
+                return _trim_kb(docs)
+
+        # Last resort: unfiltered search (no language filter)
+        fallback = await _kb_query({"query": query, "k": 2})
+        if fallback:
+            return _trim_kb(fallback)
 
         return "No relevant information found. Tell the caller you'll get someone to follow up."
 

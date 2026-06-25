@@ -38,14 +38,12 @@ async def upload_document(file: UploadFile = File(...), db: AsyncSession = Depen
     await db.commit()
 
     lang = _detect_language_from_filename(file.filename)
-    asyncio.create_task(_run_ingestion(doc_id, str(dest), suffix, db, language=lang))
+    asyncio.create_task(_run_ingestion(doc_id, str(dest), suffix, language=lang))
 
     return {"doc_id": doc_id, "filename": file.filename, "status": "processing"}
 
 
-async def _run_ingestion(doc_id: str, file_path: str, file_type: str, db: AsyncSession, language: str = "en"):
-    async with db.bind.connect() as conn:
-        pass  # use a fresh session
+async def _run_ingestion(doc_id: str, file_path: str, file_type: str, language: str = "en"):
     from database import AsyncSessionLocal
     async with AsyncSessionLocal() as session:
         try:
@@ -260,7 +258,7 @@ async def crawl_website(body: dict, db: AsyncSession = Depends(get_db)):
     db.add(doc)
     await db.commit()
 
-    asyncio.create_task(_run_ingestion(doc_id, str(dest), "txt", db, language="en"))
+    asyncio.create_task(_run_ingestion(doc_id, str(dest), "txt", language="en"))
 
     return {"doc_id": doc_id, "filename": filename, "status": "processing"}
 
@@ -283,7 +281,7 @@ async def save_text(body: dict, db: AsyncSession = Depends(get_db)):
     db.add(doc)
     await db.commit()
 
-    asyncio.create_task(_run_ingestion(doc_id, str(dest), "txt", db, language="en"))
+    asyncio.create_task(_run_ingestion(doc_id, str(dest), "txt", language="en"))
 
     return {"doc_id": doc_id, "filename": filename, "status": "processing"}
 
@@ -359,7 +357,7 @@ async def translate_document_to_kb(doc_id: str, body: dict, db: AsyncSession = D
 
     # Pass the short language tag so chunks get tagged correctly
     lang_tag = target_language[:2]   # e.g. "ta" from "ta" or "ta-IN"
-    asyncio.create_task(_run_ingestion(new_doc_id, str(dest), "translated", db, language=lang_tag))
+    asyncio.create_task(_run_ingestion(new_doc_id, str(dest), "translated", language=lang_tag))
 
     logger.info("Translated doc %s → %s (%s, lang=%s)", doc_id, new_doc_id, language_name, lang_tag)
     return {"doc_id": new_doc_id, "filename": new_filename, "status": "processing"}

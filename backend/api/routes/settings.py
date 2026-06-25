@@ -8,57 +8,36 @@ from models import AgentSetting
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 AVAILABLE_VOICES = [
-    # Sarvam AI voices — bulbul:v3 (all Indian languages)
-    {"voice_id": "sarvam:ishita",   "name": "Ishita",   "description": "Female, Natural · Sarvam AI"},
-    {"voice_id": "sarvam:priya",    "name": "Priya",    "description": "Female, Warm · Sarvam AI"},
-    {"voice_id": "sarvam:neha",     "name": "Neha",     "description": "Female, Clear · Sarvam AI"},
-    {"voice_id": "sarvam:pooja",    "name": "Pooja",    "description": "Female, Expressive · Sarvam AI"},
-    {"voice_id": "sarvam:simran",   "name": "Simran",   "description": "Female, Soft · Sarvam AI"},
-    {"voice_id": "sarvam:kavya",    "name": "Kavya",    "description": "Female, Bright · Sarvam AI"},
-    {"voice_id": "sarvam:shreya",   "name": "Shreya",   "description": "Female, Confident · Sarvam AI"},
-    {"voice_id": "sarvam:tanya",    "name": "Tanya",    "description": "Female, Friendly · Sarvam AI"},
-    {"voice_id": "sarvam:shruti",   "name": "Shruti",   "description": "Female, Energetic · Sarvam AI"},
-    {"voice_id": "sarvam:suhani",   "name": "Suhani",   "description": "Female, Gentle · Sarvam AI"},
-    {"voice_id": "sarvam:ritu",     "name": "Ritu",     "description": "Female, Crisp · Sarvam AI"},
-    {"voice_id": "sarvam:roopa",    "name": "Roopa",    "description": "Female, Rich · Sarvam AI"},
-    {"voice_id": "sarvam:rupali",   "name": "Rupali",   "description": "Female, Smooth · Sarvam AI"},
-    {"voice_id": "sarvam:niharika", "name": "Niharika", "description": "Female, Lively · Sarvam AI"},
-    {"voice_id": "sarvam:kavitha",  "name": "Kavitha",  "description": "Female, Deep · Sarvam AI"},
-    {"voice_id": "sarvam:rahul",    "name": "Rahul",    "description": "Male, Confident · Sarvam AI"},
-    {"voice_id": "sarvam:rohan",    "name": "Rohan",    "description": "Male, Warm · Sarvam AI"},
-    {"voice_id": "sarvam:aditya",   "name": "Aditya",   "description": "Male, Natural · Sarvam AI"},
-    {"voice_id": "sarvam:ashutosh", "name": "Ashutosh", "description": "Male, Clear · Sarvam AI"},
-    {"voice_id": "sarvam:amit",     "name": "Amit",     "description": "Male, Deep · Sarvam AI"},
-    {"voice_id": "sarvam:dev",      "name": "Dev",      "description": "Male, Friendly · Sarvam AI"},
-    {"voice_id": "sarvam:varun",    "name": "Varun",    "description": "Male, Energetic · Sarvam AI"},
-    {"voice_id": "sarvam:kabir",    "name": "Kabir",    "description": "Male, Rich · Sarvam AI"},
-    {"voice_id": "sarvam:ratan",    "name": "Ratan",    "description": "Male, Authoritative · Sarvam AI"},
-    {"voice_id": "sarvam:manan",    "name": "Manan",    "description": "Male, Crisp · Sarvam AI"},
-    {"voice_id": "sarvam:tarun",    "name": "Tarun",    "description": "Male, Smooth · Sarvam AI"},
-    {"voice_id": "sarvam:sunny",    "name": "Sunny",    "description": "Male, Bright · Sarvam AI"},
-    {"voice_id": "sarvam:mohit",    "name": "Mohit",    "description": "Male, Soft · Sarvam AI"},
-    {"voice_id": "sarvam:rehan",    "name": "Rehan",    "description": "Male, Expressive · Sarvam AI"},
-    {"voice_id": "sarvam:soham",    "name": "Soham",    "description": "Male, Calm · Sarvam AI"},
-    {"voice_id": "sarvam:sumit",    "name": "Sumit",    "description": "Male, Bold · Sarvam AI"},
-    {"voice_id": "sarvam:gokul",    "name": "Gokul",    "description": "Male, Grounded · Sarvam AI"},
-    {"voice_id": "sarvam:vijay",    "name": "Vijay",    "description": "Male, Strong · Sarvam AI"},
-    {"voice_id": "sarvam:advait",   "name": "Advait",   "description": "Male, Measured · Sarvam AI"},
-    {"voice_id": "sarvam:anand",    "name": "Anand",    "description": "Male, Warm · Sarvam AI"},
-    {"voice_id": "sarvam:aayan",    "name": "Aayan",    "description": "Male, Youthful · Sarvam AI"},
-    {"voice_id": "sarvam:shubh",    "name": "Shubh",    "description": "Male, Polished · Sarvam AI"},
-    {"voice_id": "sarvam:mani",     "name": "Mani",     "description": "Male, Steady · Sarvam AI"},
-    # OpenAI TTS voices
+    # ── Cartesia Sonic-3 — all languages, ~90ms latency ──────────────────────
+    # English
+    {"voice_id": "cartesia:f8f5f1b2-f02d-4d8e-a40d-fd850a487b3d", "name": "Kiara",  "description": "Indian-accented English, upbeat · Cartesia"},
+    {"voice_id": "cartesia:f039066f-cdb7-45ed-b51d-1034ae2f04a0", "name": "Cindy",  "description": "Smooth, welcoming receptionist · Cartesia"},
+    {"voice_id": "cartesia:a7a59115-2425-4192-844c-1e98ec7d6877", "name": "Amber",  "description": "Warm support agent · Cartesia"},
+    {"voice_id": "cartesia:d46abd1d-2d02-43e8-819f-51fb652c1c61", "name": "Grant",  "description": "Reliable, clear male · Cartesia"},
+    # Hindi
+    {"voice_id": "cartesia:56e35e2d-6eb6-4226-ab8b-9776515a7094", "name": "Kavita", "description": "Customer care, mature female · Cartesia Hindi"},
+    {"voice_id": "cartesia:bec003e2-3cb3-429c-8468-206a393c67ad", "name": "Parvati","description": "Friendly supporter · Cartesia Hindi"},
+    {"voice_id": "cartesia:47f3bbb1-e98f-4e0c-92c5-5f0325e1e206", "name": "Neha",   "description": "Virtual assistant, composed · Cartesia Hindi"},
+    # Telugu
+    {"voice_id": "cartesia:cf061d8b-a752-4865-81a2-57570a6e0565", "name": "Ramya",  "description": "Graceful host, warm · Cartesia Telugu"},
+    {"voice_id": "cartesia:4418bb06-8329-49a1-bb11-53bb64ca0547", "name": "Shanti", "description": "Calm authority · Cartesia Telugu"},
+    # Tamil
+    {"voice_id": "cartesia:7f98e662-142d-41ba-89a2-12452640ce6d", "name": "Lakshmi", "description": "Casual, upbeat female · Cartesia Tamil"},
+    {"voice_id": "cartesia:25d2c432-139c-4035-bfd6-9baaabcdd006", "name": "Kavya",   "description": "Warm presence · Cartesia Tamil"},
+    {"voice_id": "cartesia:01d7796d-ac10-4ea3-8df0-3cc04f2d25ff", "name": "Kavitha", "description": "Clear communicator · Cartesia Tamil"},
+    # Kannada
+    {"voice_id": "cartesia:7c6219d2-e8d2-462c-89d8-7ecba7c75d65", "name": "Divya",  "description": "Joyful narrator · Cartesia Kannada"},
+    # Malayalam
+    {"voice_id": "cartesia:b426013c-002b-4e89-8874-8cd20b68373a", "name": "Latha",  "description": "Friendly host · Cartesia Malayalam"},
+    # ── OpenAI TTS ────────────────────────────────────────────────────────────
     {"voice_id": "nova",    "name": "Nova",    "description": "Warm, Natural · OpenAI"},
     {"voice_id": "alloy",   "name": "Alloy",   "description": "Neutral, Balanced · OpenAI"},
     {"voice_id": "shimmer", "name": "Shimmer", "description": "Soft, Expressive · OpenAI"},
     {"voice_id": "echo",    "name": "Echo",    "description": "Smooth, Articulate · OpenAI"},
     {"voice_id": "onyx",    "name": "Onyx",    "description": "Deep, Authoritative · OpenAI"},
-    # ElevenLabs voices
-    {"voice_id": "CwhRBWXzGAHq8TQ4Fs17", "name": "Roger (ElevenLabs)",   "description": "Laid-Back, Casual, Resonant"},
-    {"voice_id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah (ElevenLabs)",   "description": "Mature, Reassuring, Confident"},
-    {"voice_id": "FGY2WhTYpPnrIDTdsKH5", "name": "Laura (ElevenLabs)",   "description": "Enthusiast, Quirky Attitude"},
-    {"voice_id": "IKne3meq5aSn9XLyUdCD", "name": "Charlie (ElevenLabs)", "description": "Deep, Confident, Energetic"},
-    {"voice_id": "JBFqnCBsd6RMkjVDRZzb", "name": "George (ElevenLabs)",  "description": "Warm, Captivating Storyteller"},
+    {"voice_id": "ash",     "name": "Ash",     "description": "Crisp, Confident · OpenAI"},
+    {"voice_id": "sage",    "name": "Sage",    "description": "Calm, Thoughtful · OpenAI"},
+    {"voice_id": "coral",   "name": "Coral",   "description": "Friendly, Clear · OpenAI"},
 ]
 
 AVAILABLE_LANGUAGES = [
@@ -74,7 +53,7 @@ AVAILABLE_LANGUAGES = [
     {"code": "pa-IN", "name": "Punjabi"},
 ]
 
-DEFAULTS = {"selected_voice_id": "sarvam:ishita", "default_language": "en-IN"}
+DEFAULTS = {"selected_voice_id": "cartesia:f039066f-cdb7-45ed-b51d-1034ae2f04a0", "default_language": "en-IN"}
 
 
 async def _read_all(db: AsyncSession) -> dict:

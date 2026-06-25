@@ -5,7 +5,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { format } from 'date-fns'
 import { RefreshCw, Loader2, Zap, Type, Mic, Bot, Clock } from 'lucide-react'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface MetricRow {
   session_id: string
@@ -78,6 +78,8 @@ export default function InternalPage() {
       ])
       if (metricsRes.ok) setRows(await metricsRes.json())
       if (summaryRes.ok) setSummary(await summaryRes.json())
+    } catch {
+      // API unreachable — fail silently, show empty state
     } finally {
       setLoading(false)
     }

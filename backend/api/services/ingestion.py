@@ -8,8 +8,8 @@ from services.vector_store import add_documents
 logger = logging.getLogger(__name__)
 
 _splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=150,
+    chunk_size=400,
+    chunk_overlap=50,
     separators=["\n\n", "\n", ". ", " ", ""],
 )
 

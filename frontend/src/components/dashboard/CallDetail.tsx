@@ -6,7 +6,7 @@ import { Phone, Clock, Loader2, ChevronDown, ChevronUp, Sparkles, Tag, CheckSqua
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface Transcript { id: number; speaker: string; message: string; created_at: string }
 interface Summary { summary_text: string; key_topics: string[]; action_items: string[] }
@@ -26,12 +26,13 @@ export default function CallDetail({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      fetch(`${API}/calls/${sessionId}`).then(r => r.json()),
-      fetch(`${API}/transcripts/${sessionId}`).then(r => r.json()),
+      fetch(`${API}/calls/${sessionId}`).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() }),
+      fetch(`${API}/transcripts/${sessionId}`).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() }),
     ]).then(([callData, txData]) => {
       setCall(callData)
       setTranscripts(txData)
-    }).finally(() => setLoading(false))
+    }).catch(() => {})
+    .finally(() => setLoading(false))
   }, [sessionId])
 
   const handleSummarize = async () => {
@@ -40,7 +41,6 @@ export default function CallDetail({ sessionId }: { sessionId: string }) {
       const res = await fetch(`${API}/calls/${sessionId}/summarize`, { method: 'POST' })
       const data = await res.json()
       setCall(prev => prev ? { ...prev, summary: data } : prev)
-    } finally {
       setSummarizing(false)
     }
   }

@@ -1,4 +1,4 @@
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 /** Returns true if the string contains any Indian-script Unicode characters. */
 export function hasIndianScript(text: string): boolean {

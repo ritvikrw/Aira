@@ -6,7 +6,7 @@ import { format } from 'date-fns'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface KnowledgeDoc {
   doc_id: string
@@ -50,7 +50,6 @@ export default function KnowledgeBaseManager() {
     try {
       await fetch(`${API}/knowledge-base/upload`, { method: 'POST', body: form })
       fetchDocs()
-    } finally {
       setUploading(false)
     }
   }
@@ -65,7 +64,6 @@ export default function KnowledgeBaseManager() {
     try {
       await fetch(`${API}/knowledge-base/documents/${docId}`, { method: 'DELETE' })
       setDocs(prev => prev.filter(d => d.doc_id !== docId))
-    } finally {
       setDeletingId(null)
     }
   }

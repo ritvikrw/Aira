@@ -18,7 +18,7 @@ import { CallData } from './CallCard'
 import { formatDuration, formatPhone } from '@/lib/utils'
 import { translateToEnglish } from '@/lib/translate'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface Transcript {
   id: number
@@ -104,6 +104,7 @@ export function CallDetail({ call, agentName = 'aira' }: CallDetailProps) {
     try {
       await fetch(`${API}/calls/${call.session_id}/summarize`, { method: 'POST' })
       fetchDetail(call.session_id)
+    } catch {
     } finally {
       setRegenerating(false)
     }

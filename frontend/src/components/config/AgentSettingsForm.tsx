@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { CheckCircle, Phone, Loader2 } from 'lucide-react'
 import { WebCallModal } from '@/components/calls/WebCallModal'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface Voice {
   voice_id: string

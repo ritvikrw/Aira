@@ -5,11 +5,9 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import {
   PhoneIncoming,
-  Clock,
   BarChart2,
   BookOpen,
   Settings2,
-  FlaskConical,
   StickyNote,
   LucideIcon,
 } from 'lucide-react'
@@ -45,7 +43,7 @@ function NavItem({ href, icon: Icon, label, badge }: NavItemProps) {
   )
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export function Sidebar() {
   const [activeBadge, setActiveBadge] = useState(0)
@@ -79,7 +77,7 @@ export function Sidebar() {
       <div className="px-5 py-5 border-b border-brand-300">
         <div className="flex items-center gap-2">
           <div className="w-5 h-5 bg-accent-500 rotate-45 rounded-sm flex-shrink-0" />
-          <span className="text-xl font-semibold font-serif text-ink-900 tracking-tight">
+          <span className="text-xl text-ink-900 tracking-tight" style={{ fontFamily: "'Glacial Indifference', sans-serif" }}>
             aira
           </span>
         </div>
@@ -92,7 +90,6 @@ export function Sidebar() {
         </p>
         <NavItem href="/analytics" icon={BarChart2} label="Analytics" />
         <NavItem href="/dashboard" icon={PhoneIncoming} label="Call logs" badge={activeBadge} />
-        <NavItem href="/scheduled" icon={Clock} label="Scheduled" />
 
         <p className="text-[10px] font-semibold tracking-widest text-ink-400 uppercase px-2 mt-5 mb-2">
           Config
@@ -100,11 +97,6 @@ export function Sidebar() {
         <NavItem href="/config/knowledge-base" icon={BookOpen} label="Knowledge base" />
         <NavItem href="/config/agent-settings" icon={Settings2} label="Agent settings" />
         <NavItem href="/config/instructions" icon={StickyNote} label="Instructions" />
-
-        <p className="text-[10px] font-semibold tracking-widest text-ink-400 uppercase px-2 mt-5 mb-2">
-          System
-        </p>
-        <NavItem href="/internal" icon={FlaskConical} label="Internal" />
       </nav>
 
       {/* Status footer */}

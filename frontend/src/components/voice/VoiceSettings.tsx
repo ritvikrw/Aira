@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Check, Loader2, Volume2 } from 'lucide-react'
 import Button from '@/components/ui/Button'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface Voice { voice_id: string; name: string; description: string }
 

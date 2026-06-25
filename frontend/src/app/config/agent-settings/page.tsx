@@ -3,7 +3,7 @@ import { AgentSettingsForm } from '@/components/config/AgentSettingsForm'
 
 export const dynamic = 'force-dynamic'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export default async function AgentSettingsPage() {
   let voices: Array<{ voice_id: string; name: string; description: string }> = []

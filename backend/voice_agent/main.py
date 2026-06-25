@@ -19,6 +19,8 @@ from livekit.agents import AgentSession
 from livekit.agents.tts import StreamAdapter as TtsStreamAdapter
 from livekit.agents.stt import StreamAdapter as SttStreamAdapter
 from livekit.plugins import deepgram, elevenlabs, openai as lk_openai, silero
+from livekit.plugins import google as lk_google
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from hybrid_tts import HybridTTS
 from sarvam_stt import SarvamSTT
 
@@ -27,7 +29,7 @@ from agent import ReceptionistAgent, end_call
 
 _api_client = httpx.AsyncClient(timeout=5.0)
 
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -76,11 +78,13 @@ async def _save_metrics(session_id: str, metrics, tts_provider: str | None = Non
                 "tts_requests": 1,
             }
         elif isinstance(metrics, STTMetrics):
-            # duration = total request time (0.0 for streaming STT, actual ms for batch Sarvam)
-            stt_duration = getattr(metrics, "duration", None)
+            try:
+                from sarvam_stt import last_stt_latency_ms as _stt_lat
+            except ImportError:
+                _stt_lat = None
             payload = {
                 "stt_audio_duration_ms": round((getattr(metrics, "audio_duration", 0) or 0) * 1000, 1),
-                "stt_ttft_ms": round(stt_duration * 1000, 1) if stt_duration else None,
+                "stt_ttft_ms": _stt_lat,
                 "stt_requests": 1,
             }
         if payload:
@@ -121,45 +125,54 @@ async def register_call(session_id: str, room_name: str, caller_id: str | None, 
 
 
 async def _prewarm_tts(tts) -> None:
-    """Synthesize a silent short string to establish the TTS connection before the call starts."""
+    """Prewarm TTS with a real short phrase so the first greeting has no cold-start delay."""
     try:
-        async for _ in tts.synthesize(" "):
+        async for _ in tts.synthesize("Hi"):
             break
     except Exception:
-        pass  # prewarm is best-effort
+        pass
 
 
-async def _prewarm_sarvam(sarvam_key: str) -> None:
-    """Pre-warm Sarvam TTS for the 3 most common Indian languages so the first
-    non-English response has no cold-start delay (~1.5 s saved on first Indian reply)."""
-    from hybrid_tts import SARVAM_TTS_URL
-    prewarms = [
-        ("te-IN", "kavitha", "నమస్కారం"),
-        ("hi-IN", "ishita",  "नमस्ते"),
-        ("ta-IN", "kavitha", "வணக்கம்"),
-    ]
+async def _prewarm_kb(api_base_url: str) -> None:
+    """Warm up the KB search connection while greeting plays."""
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=10.0) as c:
+            await c.post(f"{api_base_url}/knowledge-base/search",
+                         json={"query": "company products services", "k": 2})
+        logger.debug("KB prewarm done")
+    except Exception as e:
+        logger.debug("KB prewarm failed: %s", e)
 
-    async def _warm_one(lang: str, speaker: str, text: str) -> None:
+
+async def _prewarm_cartesia(cartesia_key: str) -> None:
+    """Prewarm the 3 most common Indian language Cartesia voices in parallel.
+    Fires short silent-ish requests to establish TLS + HTTP/2 connections,
+    so the first actual response after language selection plays without delay."""
+    from hybrid_tts import CARTESIA_TTS_SSE, CARTESIA_MODEL, CARTESIA_VERSION, CARTESIA_LANG_VOICES
+    import httpx as _httpx
+
+    async def _warm(lang: str) -> None:
+        voice_id, lang_code = CARTESIA_LANG_VOICES[lang]
         try:
-            from sarvam_tts import _http_client as _sarvam_http
-            await _sarvam_http.post(
-                SARVAM_TTS_URL,
-                headers={"api-subscription-key": sarvam_key},
-                json={
-                    "inputs": [text],
-                    "target_language_code": lang,
-                    "speaker": speaker,
-                    "model": "bulbul:v3",
-                    "pace": 1.35,
-                    "enable_preprocessing": True,
-                },
-                timeout=10.0,
-            )
-            logger.debug("Sarvam TTS prewarm done: %s/%s", lang, speaker)
+            async with _httpx.AsyncClient(timeout=10.0) as c:
+                async with c.stream(
+                    "POST", CARTESIA_TTS_SSE,
+                    headers={"X-API-Key": cartesia_key, "Cartesia-Version": CARTESIA_VERSION,
+                             "Content-Type": "application/json"},
+                    json={"model_id": CARTESIA_MODEL, "transcript": "hi",
+                          "voice": {"mode": "id", "id": voice_id},
+                          "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": 24000},
+                          "language": lang_code},
+                ) as resp:
+                    async for _ in resp.aiter_bytes(1024):
+                        break  # just establish connection + get first chunk
+            logger.debug("Cartesia prewarm done: %s", lang)
         except Exception as e:
-            logger.debug("Sarvam TTS prewarm failed (%s): %s", lang, e)
+            logger.debug("Cartesia prewarm failed (%s): %s", lang, e)
 
-    await asyncio.gather(*[_warm_one(*p) for p in prewarms])
+    await asyncio.gather(_warm("te"), _warm("hi"), _warm("en"), _warm("ta"))
+
 
 
 async def entrypoint(ctx: JobContext) -> None:
@@ -209,18 +222,19 @@ async def entrypoint(ctx: JobContext) -> None:
         instruction_parts.append(settings["custom_instructions"])
     instructions = "\n".join(instruction_parts)
 
-    sarvam_key  = os.getenv("SARVAM_API_KEY", "")
-    openai_key  = os.getenv("OPENAI_API_KEY", "")
-    voice_id    = settings.get("selected_voice_id") or os.getenv("ELEVENLABS_VOICE_ID", "nova")
-    eleven_key  = os.getenv("ELEVEN_API_KEY", "")
-    eleven_model = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+    sarvam_key    = os.getenv("SARVAM_API_KEY", "")
+    openai_key    = os.getenv("OPENAI_API_KEY", "")
+    voice_id      = settings.get("selected_voice_id") or os.getenv("ELEVENLABS_VOICE_ID", "nova")
+    eleven_key    = os.getenv("ELEVEN_API_KEY", "")
+    eleven_model  = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+    cartesia_key  = os.getenv("CARTESIA_API_KEY", "")
+    cartesia_voice = os.getenv("CARTESIA_VOICE_ID", "f039066f-cdb7-45ed-b51d-1034ae2f04a0")
 
     # --- STT ---
-    # Tighter VAD: faster end-of-speech detection, less waiting for silence
     vad = silero.VAD.load(
-        min_silence_duration=0.2,       # default ~0.55s — fire sooner after user stops
-        prefix_padding_duration=0.3,    # default ~0.5s  — less leading buffer
-        activation_threshold=0.5,       # default — keep same
+        min_silence_duration=0.5,       # 0.5s — prevents splitting Indian language utterances mid-sentence
+        prefix_padding_duration=0.3,
+        activation_threshold=0.6,       # 0.6 — catches quieter speech without triggering on background noise
     )
     # Use Sarvam STT when a Sarvam key is present — it handles all Indian languages
     # (Telugu, Tamil, Hindi, Kannada, etc.) and auto-detects which language is spoken.
@@ -238,74 +252,32 @@ async def entrypoint(ctx: JobContext) -> None:
         logger.info("STT provider: Deepgram")
 
     # --- TTS ---
-    # If SARVAM_API_KEY is set, ALWAYS use HybridTTS so Indian-language responses
-    # are routed to Sarvam (bulbul:v3) regardless of which English voice is selected.
-    # The selected voice only determines the English fallback provider.
-    if sarvam_key:
-        # Determine Sarvam speaker
-        sarvam_speaker_explicit = voice_id.startswith("sarvam:")
-        if sarvam_speaker_explicit:
-            sarvam_speaker = voice_id.split("sarvam:")[1]
-        else:
-            sarvam_speaker = "ishita"  # default speaker for non-Sarvam selections
+    # voice_id from settings is either "cartesia:UUID" or an OpenAI voice name.
+    # If user picked a Cartesia voice, override the English voice in HybridTTS.
+    # Indian language voices are always chosen by language from CARTESIA_LANG_VOICES.
+    if voice_id.startswith("cartesia:"):
+        cartesia_voice = voice_id.split("cartesia:", 1)[1]   # extract UUID
 
-        # Determine English fallback provider
-        if voice_id in OPENAI_VOICES:
-            # User picked an OpenAI voice → use it for English
-            tts = HybridTTS(
-                sarvam_api_key=sarvam_key,
-                sarvam_speaker=sarvam_speaker,
-                sarvam_speaker_explicit=sarvam_speaker_explicit,
-                openai_api_key=openai_key,
-                openai_voice=voice_id,
-            )
-            tts_provider = f"Hybrid / Sarvam:{sarvam_speaker} + OpenAI:{voice_id}"
-            logger.info("TTS provider: HybridTTS (Sarvam:%s + OpenAI:%s)", sarvam_speaker, voice_id)
-        elif eleven_key and not voice_id.startswith("sarvam:") and voice_id not in OPENAI_VOICES:
-            # User picked an ElevenLabs voice → use it for English
-            tts = HybridTTS(
-                sarvam_api_key=sarvam_key,
-                sarvam_speaker=sarvam_speaker,
-                sarvam_speaker_explicit=sarvam_speaker_explicit,
-                eleven_api_key=eleven_key,
-                eleven_voice_id=voice_id,
-                eleven_model=eleven_model,
-            )
-            tts_provider = f"Hybrid / Sarvam:{sarvam_speaker} + ElevenLabs:{voice_id}"
-            logger.info("TTS provider: HybridTTS (Sarvam:%s + ElevenLabs:%s)", sarvam_speaker, voice_id)
-        else:
-            # Sarvam voice selected or no other provider — fall back to OpenAI nova for English
-            openai_voice = os.getenv("OPENAI_TTS_VOICE", "nova")
-            tts = HybridTTS(
-                sarvam_api_key=sarvam_key,
-                sarvam_speaker=sarvam_speaker,
-                sarvam_speaker_explicit=sarvam_speaker_explicit,
-                openai_api_key=openai_key,
-                openai_voice=openai_voice,
-            )
-            tts_provider = f"Hybrid / Sarvam:{sarvam_speaker} + OpenAI:{openai_voice}"
-            logger.info("TTS provider: HybridTTS (Sarvam:%s + OpenAI:%s)", sarvam_speaker, openai_voice)
-    elif voice_id in OPENAI_VOICES:
-        # No Sarvam key — use selected provider directly
-        tts = lk_openai.TTS(model="tts-1", voice=voice_id)
-        tts_provider = f"OpenAI / tts-1 ({voice_id})"
-        logger.info("TTS provider: OpenAI (voice=%s)", voice_id)
-    elif eleven_key:
-        tts = elevenlabs.TTS(voice_id=voice_id, model=eleven_model, api_key=eleven_key)
-        tts_provider = f"ElevenLabs / {eleven_model}"
-        logger.info("TTS provider: ElevenLabs (voice=%s)", voice_id)
+    tts = HybridTTS(
+        sarvam_api_key=sarvam_key,
+        sarvam_speaker="ishita",
+        cartesia_api_key=cartesia_key,
+        cartesia_voice_id=cartesia_voice,
+        openai_api_key=openai_key,
+        openai_voice=voice_id if voice_id in OPENAI_VOICES else "nova",
+    )
+    if cartesia_key:
+        tts_provider = f"Cartesia sonic-3 (en={cartesia_voice[:8]}…)"
     else:
-        # Final fallback — OpenAI nova
-        tts = lk_openai.TTS(model="tts-1", voice="nova")
-        tts_provider = "OpenAI / tts-1 (nova)"
-        logger.info("TTS provider: OpenAI fallback (nova)")
+        tts_provider = f"Sarvam + OpenAI:{voice_id if voice_id in OPENAI_VOICES else 'nova'}"
+    logger.info("TTS provider: %s", tts_provider)
 
     # Record TTS provider for this session immediately
     asyncio.create_task(_save_metrics(session_id, None, tts_provider=tts_provider))
 
-    # Start Sarvam prewarm in background first so it runs concurrently with TTS prewarm.
-    if sarvam_key:
-        asyncio.create_task(_prewarm_sarvam(sarvam_key))
+    # Prewarm Cartesia voices in background
+    if cartesia_key:
+        asyncio.create_task(_prewarm_cartesia(cartesia_key))
 
     # Pre-warm TTS connection so the greeting has no cold-start delay.
     await _prewarm_tts(tts)
@@ -315,26 +287,41 @@ async def entrypoint(ctx: JobContext) -> None:
     # instead of waiting for the full LLM response to finish.
     tts_final = TtsStreamAdapter(tts=tts)
 
-    llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    gemini_key = os.getenv("GOOGLE_API_KEY", "")
     temperature = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-    llm = lk_openai.LLM(model=llm_model, temperature=temperature)
-    logger.info("LLM provider: OpenAI (%s, temp=%.1f)", llm_model, temperature)
+    if gemini_key:
+        llm = lk_google.LLM(model="gemini-2.5-flash", api_key=gemini_key, temperature=temperature)
+        logger.info("LLM provider: Gemini 2.0 Flash (temp=%.1f)", temperature)
+    else:
+        llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+        llm = lk_openai.LLM(model=llm_model, temperature=temperature)
+        logger.info("LLM provider: OpenAI (%s, temp=%.1f)", llm_model, temperature)
 
     session = AgentSession(
         vad=vad,
         stt=stt_instance,
         llm=llm,
         tts=tts_final,
-        min_endpointing_delay=0.2,   # default 0.5s — start processing sooner after silence
+        turn_detection=MultilingualModel(),  # ML end-of-utterance — works across all Indian languages
+        min_endpointing_delay=0.4,   # 0.4s prevents STT splitting one utterance into two fragments
     )
 
     agent = ReceptionistAgent(session_id=session_id, agent_name=agent_name, org_name=org_name, org_description=org_description, instructions=instructions, default_language=default_language)
+
+    # Prewarm KB in background while greeting plays (warms ChromaDB connection)
+    asyncio.create_task(_prewarm_kb(API_BASE_URL))
+    # Note: LLM prewarm removed — OpenAI prompt cache requires exact prefix match,
+    # so a dummy "hi" call doesn't cache anything useful and wastes ~800 tokens/call.
 
     @ctx.room.on("participant_disconnected")
     def on_participant_disconnected(participant):
         if participant.identity != ctx.room.local_participant.identity:
             logger.info("Caller disconnected - ending session %s", session_id)
             asyncio.create_task(end_call(session_id, room_name=room_name, caller_id=caller_id, start_time=call_start_time))
+
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(ev):
+        agent.on_agent_state_changed(ev)
 
     @session.on("conversation_item_added")
     def on_conversation_item_added(ev):
@@ -347,7 +334,6 @@ async def entrypoint(ctx: JobContext) -> None:
             text = item.text_content
             if text and text.strip():
                 asyncio.create_task(_save_transcript(session_id, "agent", text.strip()))
-                # Fallback: detect name from agent's acknowledgement (e.g. "Thank you, Somalingam!")
                 agent.on_agent_reply(text.strip())
 
     @session.on("metrics_collected")
@@ -355,6 +341,7 @@ async def entrypoint(ctx: JobContext) -> None:
         asyncio.create_task(_save_metrics(session_id, ev.metrics))
 
     await session.start(agent, room=ctx.room)
+
 
     await asyncio.sleep(float("inf"))
 

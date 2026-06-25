@@ -14,7 +14,7 @@ services:
       POSTGRES_PASSWORD: recep
       POSTGRES_DB: recep
     ports:
-      - "5434:5432"
+      - "5435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -29,7 +29,7 @@ services:
       context: ./api
       dockerfile: Dockerfile
     ports:
-      - "8001:8001"
+      - "8000:8001"
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://recep:recep@postgres:5432/recep

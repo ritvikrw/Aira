@@ -16,7 +16,7 @@ const TIMEZONES = [
   { label: 'PST (UTC-8)', value: 'America/Los_Angeles' },
 ]
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const EMPTY_DATA = {
   total_calls: 0, active_calls: 0, calls_today: 0, avg_duration_seconds: 0,
@@ -87,7 +87,8 @@ export default function AnalyticsPage() {
       setRecatResult(result)
       // Refresh analytics after recategorisation
       fetchData(startDate, endDate)
-    } finally {
+      setRecategorizing(false)
+    } catch {
       setRecategorizing(false)
     }
   }

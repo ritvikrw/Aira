@@ -1,5 +1,6 @@
 import logging
-from langchain_openai import ChatOpenAI
+import os
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
@@ -15,7 +16,11 @@ CATEGORIES = [
     "Other",
 ]
 
-_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+_llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=os.getenv("GOOGLE_API_KEY", ""),
+    temperature=0,
+)
 
 _prompt = ChatPromptTemplate.from_messages([
     ("system", """You are a call summarization assistant. Given a phone call transcript between a caller (USER) and an AI receptionist (AGENT), produce a concise JSON summary.
@@ -55,7 +60,6 @@ async def summarize_call(transcripts: list[dict]) -> dict:
 
     try:
         result = await _chain.ainvoke({"transcript": transcript_text, "categories": ", ".join(f'"{c}"' for c in CATEGORIES)})
-        # Normalise category — fall back to Other if LLM returns something unexpected
         if result.get("call_category") not in CATEGORIES:
             result["call_category"] = "Other"
         return result

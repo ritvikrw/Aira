@@ -20,8 +20,7 @@ import logging
 import os
 
 import httpx
-from livekit import rtc
-from livekit.agents import tts, utils
+from livekit.agents import tts
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 
 logger = logging.getLogger(__name__)
@@ -31,14 +30,6 @@ _http_client = httpx.AsyncClient(timeout=60.0)
 SARVAM_TTS_URL = "https://api.sarvam.ai/text-to-speech"
 SAMPLE_RATE    = 22050
 NUM_CHANNELS   = 1
-
-# bulbul:v3 has 38 speakers — all work across all Indian languages
-LANGUAGE_SPEAKERS: dict[str, str] = {
-    "hi-IN": "ishita", "te-IN": "ishita", "ta-IN": "ishita",
-    "kn-IN": "ishita", "ml-IN": "ishita", "mr-IN": "ishita",
-    "bn-IN": "ishita", "gu-IN": "ishita", "od-IN": "ishita",
-    "pa-IN": "ishita", "en-IN": "ishita",
-}
 
 
 class SarvamTTS(tts.TTS):
@@ -202,12 +193,6 @@ def _wav_to_pcm_with_rate(wav_bytes: bytes) -> tuple[bytes, int]:
     buf = io.BytesIO(wav_bytes)
     with wave.open(buf, "rb") as wf:
         return wf.readframes(wf.getnframes()), wf.getframerate()
-
-
-def _wav_to_pcm(wav_bytes: bytes) -> bytes:
-    """Legacy — strip WAV header and return raw 16-bit PCM bytes."""
-    pcm, _ = _wav_to_pcm_with_rate(wav_bytes)
-    return pcm
 
 
 def _detect_script_language(text: str) -> str | None:

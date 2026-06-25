@@ -4,7 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { useEffect, useState } from 'react'
 import { CheckCircle, Loader2, Clock, UserX, ShieldOff, StickyNote } from 'lucide-react'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 // Character limits calculated so total system prompt stays under ~500 tokens
 const LIMITS = {
@@ -149,6 +149,8 @@ export default function InstructionsPage() {
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
+    } catch (e) {
+      console.error('Save failed', e)
     } finally {
       setSaving(false)
     }

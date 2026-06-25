@@ -6,7 +6,7 @@ import { startOfDay, subDays, subMonths, isAfter } from 'date-fns'
 import CallCard from './CallCard'
 import CallDetail from './CallDetail'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface Call {
   session_id: string
@@ -42,8 +42,9 @@ export default function DashboardClient() {
 
   useEffect(() => {
     fetch(`${API}/calls/`)
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
       .then(data => { setCalls(data); if (data.length > 0) setSelected(data[0].session_id) })
+      .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
 

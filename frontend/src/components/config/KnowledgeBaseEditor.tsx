@@ -5,7 +5,7 @@ import { Trash2, Upload, FileText, FileSpreadsheet, X, AlertCircle, Globe, Loade
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const LANGUAGES = [
   { code: 'hi', name: 'Hindi' },
@@ -58,6 +58,7 @@ export function KnowledgeBaseEditor() {
       try {
         const res = await fetch(`${API}/knowledge-base/documents`)
         if (res.ok) setFiles(await res.json())
+      } catch {
       } finally {
         setLoading(false)
       }
@@ -197,7 +198,6 @@ export function KnowledgeBaseEditor() {
       }, ...prev])
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Translation failed')
-    } finally {
       setTranslatingToKb(null)
     }
   }
@@ -211,6 +211,7 @@ export function KnowledgeBaseEditor() {
       const res = await fetch(`${API}/knowledge-base/documents/${doc.doc_id}/content`)
       const data = await res.json() as { chunks: string[] }
       setDocContent(prev => ({ ...prev, [doc.doc_id]: data.chunks.join('\n\n---\n\n') }))
+    } catch {
     } finally {
       setLoadingContent(null)
     }
