@@ -28,24 +28,14 @@ _AGENT_ECHO_NAME_RE = re.compile(
 _LANG_MAP: dict[str, str] = {
     "english": "en-IN", "hindi": "hi-IN", "telugu": "te-IN",
     "tamil": "ta-IN", "kannada": "kn-IN", "malayalam": "ml-IN",
-    "marathi": "mr-IN", "bengali": "bn-IN", "gujarati": "gu-IN", "punjabi": "pa-IN",
-    "తెలుగు": "te-IN", "తెలగు": "te-IN",
+    "తెలుగు": "te-IN", "తెలగు": "te-IN", "తెలేగు": "te-IN",
     "हिंदी": "hi-IN", "हिन्दी": "hi-IN",
-    "தமிழ்": "ta-IN",
-    "ಕನ್ನಡ": "kn-IN",
+    "தமிழ்": "ta-IN", "தெலுகு": "te-IN", "தெலுங்கு": "te-IN",
+    "ಕನ್ನಡ": "kn-IN", "ತೆಲುಗು": "te-IN", "ತಮಿಳು": "ta-IN",
     "മലയാളം": "ml-IN",
-    "मराठी": "mr-IN",
-    "বাংলা": "bn-IN",
-    "ਪੰਜਾਬੀ": "pa-IN",
-    "ਤੇਲਗੂ": "te-IN", "ਤੇਲੁਗੂ": "te-IN",
-    "తెలేగు": "te-IN", "తెలుగు": "te-IN",
-    "तेलुगु": "te-IN", "तेलगु": "te-IN",
-    "ତେଲୁଗୁ": "te-IN", "ତେଲକୁ": "te-IN",
-    "தெலுகு": "te-IN", "தெலுங்கு": "te-IN", "தெலுகூ": "te-IN",
-    "ತೆಲುಗು": "te-IN", "ತೆಲಗು": "te-IN",
+    "తమిళ్": "ta-IN", "కన్నడ": "kn-IN",
     "இந்தி": "hi-IN", "హిందీ": "hi-IN", "ಹಿಂದಿ": "hi-IN",
-    "తమిళ్": "ta-IN", "ತಮಿಳು": "ta-IN",
-    "కన్నడ": "kn-IN", "கன்னடம்": "kn-IN",
+    "तेलुगु": "te-IN", "तेलगु": "te-IN",
 }
 
 _SWITCH_PHRASES = [
@@ -63,12 +53,12 @@ _LANG_SWITCH_FILLER = "Sure, switching now!"
 
 # Silence check phrases per language
 _SILENCE_PHRASES = {
-    "te-IN": "నేను ఇక్కడే ఉన్నాను, మీరు వినగలుగుతున్నారా?",
+    "en-IN": "I'm still here, are you there?",
     "hi-IN": "main yahan hoon, kya aap sun pa rahe hain?",
     "ta-IN": "naan inge irukkiren, kekkuringala?",
+    "te-IN": "నేను ఇక్కడే ఉన్నాను, మీరు వినగలుగుతున్నారా?",
     "kn-IN": "naanu illiddeene, neevu keluttiddeera?",
     "ml-IN": "njaan ivideyundu, kelkkunundo?",
-    "en-IN": "I'm still here, are you there?",
 }
 
 # One-line native greetings for non-English default languages.
@@ -78,10 +68,6 @@ _NATIVE_GREETINGS: dict[str, str] = {
     "kn-IN": "ನಮಸ್ಕಾರ! ನಾನು {name}, {org} ಕಡೆಯಿಂದ ಮಾತನಾಡುತ್ತಿದ್ದೇನೆ — ಹೇಗೆ help ಮಾಡಬಹುದು?",
     "hi-IN": "नमस्ते! मैं {name} हूँ, {org} की तरफ से — आपकी कैसे help कर सकती हूँ?",
     "ml-IN": "നമസ്കാരം! ഞാൻ {name}, {org}-ൽ നിന്ന് — എങ്ങനെ help ചെയ്യാം?",
-    "mr-IN": "नमस्कार! मी {name}, {org} कडून बोलतेय — कशी मदत करू?",
-    "bn-IN": "নমস্কার! আমি {name}, {org} থেকে বলছি — কীভাবে সাহায্য করতে পারি?",
-    "gu-IN": "નમસ્તે! હું {name}, {org} તરફથી — કઈ રીતે help કરી શકું?",
-    "pa-IN": "ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ! ਮੈਂ {name}, {org} ਤੋਂ — ਕਿਵੇਂ help ਕਰ ਸਕਦੀ ਹਾਂ?",
 }
 
 logger = logging.getLogger(__name__)

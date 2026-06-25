@@ -1,5 +1,5 @@
 from .base import build_base_prompt
-from . import en_IN, hi_IN, ta_IN, te_IN, kn_IN, ml_IN, mr_IN, bn_IN, gu_IN, pa_IN
+from . import en_IN, hi_IN, ta_IN, te_IN, kn_IN, ml_IN
 
 _LANGUAGE_MODULES = {
     "en-IN": en_IN,
@@ -8,10 +8,6 @@ _LANGUAGE_MODULES = {
     "te-IN": te_IN,
     "kn-IN": kn_IN,
     "ml-IN": ml_IN,
-    "mr-IN": mr_IN,
-    "bn-IN": bn_IN,
-    "gu-IN": gu_IN,
-    "pa-IN": pa_IN,
 }
 
 LANGUAGE_NAMES = {code: mod.LANGUAGE_NAME for code, mod in _LANGUAGE_MODULES.items()}
