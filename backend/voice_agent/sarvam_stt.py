@@ -121,9 +121,11 @@ class SarvamSTT(stt.STT):
         transcript    = (data.get("transcript") or "").strip()
         detected_lang = data.get("language_code") or lang or "en-IN"
 
-        # Only update detected_language if not locked (prevents random switches)
+        _SUPPORTED = {"en-IN", "hi-IN", "ta-IN", "te-IN", "kn-IN", "ml-IN"}
+
+        # Only update detected_language if not locked and language is supported
         if not _locked_language and detected_lang and detected_lang != "unknown":
-            detected_language = detected_lang
+            detected_language = detected_lang if detected_lang in _SUPPORTED else "en-IN"
 
         if not transcript:
             logger.warning("Sarvam STT empty result [%s%s] — audio too short or silence", detected_lang, " locked" if _locked_language else "")
