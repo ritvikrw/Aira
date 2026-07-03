@@ -48,8 +48,15 @@ _SWITCH_PHRASES = [
 _THINKING_FILLERS = ["Sure...", "One moment...", "Got it...", "Let me check..."]
 _filler_index = 0
 
-# Language-switch filler — English, plays before language is locked
-_LANG_SWITCH_FILLER = "Sure, switching now!"
+# Language-switch greetings — played immediately after switch, added to chat context
+# so the LLM sees the agent already responded in the new language and continues naturally.
+_SWITCH_GREETINGS: dict[str, str] = {
+    "ta-IN": "வணக்கம்! என்ன help பண்ணட்டும்?",
+    "te-IN": "నమస్కారం! ఎలా help చేయాలి?",
+    "hi-IN": "नमस्ते! मैं कैसे help करूँ?",
+    "kn-IN": "ನಮಸ್ಕಾರ! ಹೇಗೆ help ಮಾಡಲಿ?",
+    "ml-IN": "നമസ്കാരം! എങ്ങനെ help ചെയ്യാം?",
+}
 
 # Silence check phrases per language
 _SILENCE_PHRASES = {
@@ -91,6 +98,7 @@ class ReceptionistAgent(Agent):
         self._first_turn_done   = False
         self._silence_task: asyncio.Task | None = None
         self._filler_task: asyncio.Task | None = None
+        self._generating        = False   # debounce: skip duplicate LLM calls from STT splits
 
         try:
             import sarvam_stt
@@ -167,6 +175,7 @@ class ReceptionistAgent(Agent):
         else:  # speaking
             self._cancel_filler_task()
             self._cancel_silence_timer()
+            self._generating = False
 
     # ------------------------------------------------------------------
 
@@ -175,6 +184,14 @@ class ReceptionistAgent(Agent):
         if not text:
             return
 
+        # Debounce: STT sometimes splits one utterance into two rapid messages.
+        # If we're already generating a response, skip this duplicate turn.
+        if self._generating:
+            logger.info("Skipping duplicate user turn (still generating): %r", text[:60])
+            asyncio.create_task(_save_transcript(self._session_id, "user", text))
+            return
+
+        self._generating = True
         asyncio.create_task(_save_transcript(self._session_id, "user", text))
         self._cancel_silence_timer()
 
@@ -212,17 +229,18 @@ class ReceptionistAgent(Agent):
                 asyncio.create_task(_persist_caller_name(self._session_id, name))
 
     async def _do_language_switch(self, lang: str, turn_ctx) -> None:
-        """Lock language first so TTS uses the right voice even if LLM starts responding
-        during the filler synthesis, then play the switch filler."""
-        self._set_language(lang)  # must come before any await
-        # No filler or prompt change needed for English — it's already the default
         if lang == "en-IN":
-            logger.info("Language switch to English — no filler, continuing")
+            self._set_language(lang)
             return
-        logger.info("Language switch → %s, playing filler", lang)
-        await self.session.say(_LANG_SWITCH_FILLER, add_to_chat_ctx=False)
-        logger.info("Language locked: %s", lang)
-        # Update agent instructions so LLM uses language-specific prompt from this turn on
+
+        # Play filler in English voice BEFORE locking language — so Cartesia English TTS speaks it
+        # session.say() returns a SpeechHandle (not a coroutine) — call without await to fire and forget
+        self.session.say("Sure, switching now!", add_to_chat_ctx=False)
+
+        # Lock language AFTER scheduling filler so TTS switches to target language from here on
+        self._set_language(lang)
+
+        # Update instructions for the LLM
         try:
             focused = build_prompt(
                 self._agent_name, self._org_name,
@@ -230,7 +248,7 @@ class ReceptionistAgent(Agent):
                 self._org_description, self._instructions_str,
             )
             await self.update_instructions(focused)
-            logger.info("Instructions updated for %s (%d chars)", lang, len(focused))
+            logger.info("Language switched → %s", lang)
         except Exception as e:
             logger.warning("update_instructions failed: %s", e)
 
