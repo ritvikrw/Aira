@@ -1,0 +1,82 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chroma-pvc
+  namespace: recep-{{ .Values.client.name }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.chroma.storageSize }}
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads-pvc
+  namespace: recep-{{ .Values.client.name }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.uploads.storageSize }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recep-api
+  namespace: recep-{{ .Values.client.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recep-api
+  template:
+    metadata:
+      labels:
+        app: recep-api
+    spec:
+      containers:
+        - name: api
+          image: {{ .Values.image.api }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8001
+          envFrom:
+            - configMapRef:
+                name: recep-config
+            - secretRef:
+                name: recep-secrets
+          volumeMounts:
+            - name: chroma
+              mountPath: /data/chroma
+            - name: uploads
+              mountPath: /data/uploads
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: chroma
+          persistentVolumeClaim:
+            claimName: chroma-pvc
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: uploads-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recep-api
+  namespace: recep-{{ .Values.client.name }}
+spec:
+  selector:
+    app: recep-api
+  ports:
+    - port: 8001
+      targetPort: 8001

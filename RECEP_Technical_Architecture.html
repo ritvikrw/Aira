@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RECEP — Technical Architecture &amp; Deployment Specification</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0B1622;--s1:#111E2E;--s2:#162335;--border:#1F3450;
+  --text:#C4D4E3;--muted:#5E7A95;--head:#EDF2F7;
+  --orange:#C4621A;--orange2:#E06B28;
+  --teal:#00C9A7;--blue:#4DA6FF;--purple:#A78BFA;--yellow:#F5A623;--red:#FF5F6D;
+  --mono:'Cascadia Code','Fira Code',Consolas,monospace;
+  --sans:-apple-system,'Segoe UI',system-ui,sans-serif;
+}
+@media print{
+  body{background:#fff;color:#111;padding:20px}
+  :root{--bg:#fff;--s1:#f5f7fa;--s2:#eef1f5;--border:#d0d7e2;
+    --text:#2d3748;--muted:#64748b;--head:#0f172a;
+    --orange:#b45309;--teal:#0d9488;--blue:#2563eb;--purple:#7c3aed;--yellow:#d97706;--red:#dc2626}
+  .no-print{display:none}
+  .page-break{page-break-before:always}
+}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13.5px;line-height:1.7;
+  padding:48px 56px 80px;max-width:1000px;margin:0 auto}
+
+/* cover */
+.cover{border-bottom:2px solid var(--orange);padding-bottom:32px;margin-bottom:48px}
+.cover-eyebrow{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--orange);font-weight:700;margin-bottom:10px}
+.cover-title{font-size:28px;font-weight:800;color:var(--head);line-height:1.15;margin-bottom:8px}
+.cover-sub{font-size:15px;color:var(--muted);margin-bottom:24px}
+.cover-meta{display:grid;grid-template-columns:repeat(3,auto);gap:32px;width:fit-content}
+.cover-meta-item label{display:block;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:3px}
+.cover-meta-item span{font-size:13px;color:var(--head);font-weight:600}
+
+/* toc */
+.toc{background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:20px 24px;margin-bottom:48px}
+.toc-title{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:var(--muted);margin-bottom:12px}
+.toc ol{padding-left:18px}
+.toc li{font-size:13px;color:var(--text);padding:2px 0}
+.toc li a{color:var(--text);text-decoration:none}
+.toc li a:hover{color:var(--orange)}
+
+/* section */
+.sec{margin-bottom:52px}
+.sec-num{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);font-weight:700;margin-bottom:4px}
+h2{font-size:17px;font-weight:800;color:var(--head);border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:20px}
+h3{font-size:13px;font-weight:700;color:var(--head);margin:20px 0 10px}
+
+/* overview boxes */
+.overview-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+.ov-card{background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:16px}
+.ov-label{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:4px}
+.ov-val{font-size:20px;font-weight:800;color:var(--head);font-variant-numeric:tabular-nums;line-height:1.1}
+.ov-sub{font-size:11px;color:var(--muted);margin-top:3px}
+
+/* tables */
+.tbl{width:100%;border-collapse:collapse;background:var(--s1);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px}
+.tbl th{text-align:left;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--s2)}
+.tbl td{padding:10px 16px;border-bottom:1px solid rgba(31,52,80,.45);font-size:12.5px;vertical-align:top}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:rgba(255,255,255,.015)}
+.tn{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--head)}
+.tm{font-family:var(--mono);font-size:12px;color:var(--blue);font-weight:600}
+.tnote{font-size:11.5px;color:var(--muted)}
+.tc{font-family:var(--mono);font-size:11px;color:var(--teal)}
+
+/* badges */
+.badge{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:3px;white-space:nowrap;display:inline-block}
+.b-orange{background:rgba(196,98,26,.12);color:var(--orange);border:1px solid rgba(196,98,26,.25)}
+.b-teal{background:rgba(0,201,167,.1);color:var(--teal);border:1px solid rgba(0,201,167,.2)}
+.b-blue{background:rgba(77,166,255,.1);color:var(--blue);border:1px solid rgba(77,166,255,.2)}
+.b-purple{background:rgba(167,139,250,.1);color:var(--purple);border:1px solid rgba(167,139,250,.2)}
+.b-yellow{background:rgba(245,166,35,.1);color:var(--yellow);border:1px solid rgba(245,166,35,.2)}
+.b-red{background:rgba(255,95,109,.1);color:var(--red);border:1px solid rgba(255,95,109,.2)}
+.b-muted{background:rgba(94,122,149,.1);color:var(--muted);border:1px solid rgba(94,122,149,.2)}
+
+/* note boxes */
+.note{border-left:3px solid var(--orange);background:var(--s2);border-radius:0 6px 6px 0;padding:12px 16px;font-size:12.5px;line-height:1.65;margin:12px 0}
+.note.teal{border-color:var(--teal)}
+.note.blue{border-color:var(--blue)}
+.note.red{border-color:var(--red)}
+.note strong{color:var(--head)}
+
+/* architecture diagram (CSS-only) */
+.arch-diagram{display:grid;grid-template-columns:1fr 40px 1fr 40px 1fr;gap:0;background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:24px;overflow-x:auto;min-width:600px}
+.arch-col-title{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:var(--muted);text-align:center;padding:0 8px 14px;white-space:nowrap}
+.arch-col-title.highlight{color:var(--orange)}
+.arch-box{border-radius:7px;border:1px solid;padding:11px 13px;margin:4px 6px}
+.arch-box-name{font-size:12px;font-weight:700;color:var(--head);margin-bottom:2px}
+.arch-box-desc{font-size:10.5px;color:var(--muted);line-height:1.5}
+.arch-box-port{font-family:var(--mono);font-size:10px;margin-top:5px}
+.ab-teal{background:rgba(0,201,167,.06);border-color:rgba(0,201,167,.3)}
+.ab-orange{background:rgba(196,98,26,.06);border-color:rgba(196,98,26,.3)}
+.ab-blue{background:rgba(77,166,255,.06);border-color:rgba(77,166,255,.3)}
+.ab-purple{background:rgba(167,139,250,.06);border-color:rgba(167,139,250,.3)}
+.ab-yellow{background:rgba(245,166,35,.06);border-color:rgba(245,166,35,.3)}
+.ab-muted{background:rgba(94,122,149,.05);border-color:rgba(94,122,149,.2)}
+.arch-arrow{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;padding:40px 0}
+.arch-arrow-line{width:1px;height:36px;background:var(--border);position:relative}
+.arch-arrow-line::after{content:'';position:absolute;bottom:-4px;left:-3px;width:0;height:0;
+  border-left:3px solid transparent;border-right:3px solid transparent;border-top:5px solid var(--border)}
+.arch-arrow-label{font-size:9.5px;color:var(--muted);text-align:center;line-height:1.4;max-width:44px}
+
+/* call flow */
+.flow{display:flex;align-items:center;flex-wrap:nowrap;overflow-x:auto;padding:16px 0 8px;gap:0}
+.flow-node{background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:10px 14px;text-align:center;flex-shrink:0}
+.flow-node-name{font-size:12px;font-weight:700;color:var(--head)}
+.flow-node-sub{font-size:10px;color:var(--muted);margin-top:2px}
+.flow-arr{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:0 4px}
+.flow-arr-line{width:36px;height:1px;background:var(--border);position:relative}
+.flow-arr-line::after{content:'';position:absolute;right:-4px;top:-3px;width:0;height:0;
+  border-top:3px solid transparent;border-bottom:3px solid transparent;border-left:5px solid var(--border)}
+.flow-tag{font-size:9px;color:var(--muted);white-space:nowrap}
+
+/* VM spec */
+.spec-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.spec-card{background:var(--s1);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.spec-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.spec-title{font-size:12.5px;font-weight:700;color:var(--head)}
+.spec-row{display:flex;justify-content:space-between;padding:8px 16px;border-bottom:1px solid rgba(31,52,80,.4)}
+.spec-row:last-child{border-bottom:none}
+.spec-key{font-size:11.5px;color:var(--muted)}
+.spec-val{font-size:11.5px;font-weight:700;color:var(--head);font-family:var(--mono)}
+
+/* network */
+.port-tbl th,.port-tbl td{padding:9px 14px}
+
+/* scaling */
+.scale-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.scale-card{background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:14px}
+.scale-tier{font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-bottom:6px}
+.scale-clients{font-size:18px;font-weight:800;color:var(--head);font-variant-numeric:tabular-nums}
+.scale-calls{font-size:11px;color:var(--muted);margin-bottom:10px}
+.scale-spec{font-size:12px;color:var(--text);line-height:1.8}
+.scale-cost{font-size:12px;font-weight:700;color:var(--orange);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+
+code{font-family:var(--mono);font-size:11px;background:rgba(77,166,255,.08);border:1px solid rgba(77,166,255,.14);border-radius:3px;padding:1px 5px;color:var(--blue)}
+
+.footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);display:flex;justify-content:space-between}
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+  <div class="cover-eyebrow">Technical Architecture Document — Confidential</div>
+  <div class="cover-title">RECEP Platform</div>
+  <div class="cover-sub">Multi-tenant AI Voice Receptionist — Self-hosted Single VM Deployment</div>
+  <div class="cover-meta">
+    <div class="cover-meta-item"><label>Prepared by</label><span>Engineering Team</span></div>
+    <div class="cover-meta-item"><label>Date</label><span>June 2026</span></div>
+    <div class="cover-meta-item"><label>Status</label><span>Pilot Architecture</span></div>
+  </div>
+</div>
+
+<!-- TOC -->
+<div class="toc">
+  <div class="toc-title">Table of Contents</div>
+  <ol>
+    <li><a href="#s1">System Overview</a></li>
+    <li><a href="#s2">Component Architecture</a></li>
+    <li><a href="#s3">Call Flow — End to End</a></li>
+    <li><a href="#s4">Running Processes &amp; Resource Requirements</a></li>
+    <li><a href="#s5">Storage Requirements</a></li>
+    <li><a href="#s6">Network &amp; Port Map</a></li>
+    <li><a href="#s7">VM Sizing &amp; Scaling Tiers</a></li>
+    <li><a href="#s8">Multi-tenancy — How it Works</a></li>
+    <li><a href="#s9">Technology Stack</a></li>
+    <li><a href="#s10">Deployment Checklist</a></li>
+  </ol>
+</div>
+
+<!-- 1. OVERVIEW -->
+<div class="sec" id="s1">
+  <div class="sec-num">Section 1</div>
+  <h2>System Overview</h2>
+
+  <div class="overview-grid">
+    <div class="ov-card">
+      <div class="ov-label">Deployment model</div>
+      <div class="ov-val">Single VM</div>
+      <div class="ov-sub">All services on one node. No cloud-managed services.</div>
+    </div>
+    <div class="ov-card">
+      <div class="ov-label">Clients served</div>
+      <div class="ov-val">N clients</div>
+      <div class="ov-sub">One codebase, one deployment, data isolated by client_id</div>
+    </div>
+    <div class="ov-card">
+      <div class="ov-label">Voice pipeline</div>
+      <div class="ov-val">WebRTC + SIP</div>
+      <div class="ov-sub">LiveKit self-hosted + Sarvam STT + Gemini/OpenAI LLM + Cartesia TTS</div>
+    </div>
+    <div class="ov-card">
+      <div class="ov-label">Languages</div>
+      <div class="ov-val">6</div>
+      <div class="ov-sub">English, Hindi, Tamil, Telugu, Kannada, Malayalam</div>
+    </div>
+    <div class="ov-card">
+      <div class="ov-label">API keys</div>
+      <div class="ov-val">Per client</div>
+      <div class="ov-sub">Each client brings their own STT / LLM / TTS keys. No shared quota.</div>
+    </div>
+    <div class="ov-card">
+      <div class="ov-label">Knowledge base</div>
+      <div class="ov-val">Isolated</div>
+      <div class="ov-sub">ChromaDB — one vector collection per client. Documents never cross clients.</div>
+    </div>
+  </div>
+
+  <div class="note teal">
+    <strong>Core design principle:</strong> RECEP is a single deployment that serves multiple clients. Client isolation is achieved through a <code>client_id</code> field in every database table and a separate ChromaDB collection per client. There is no separate server, container, or database per client.
+  </div>
+</div>
+
+<!-- 2. COMPONENT ARCHITECTURE -->
+<div class="sec" id="s2">
+  <div class="sec-num">Section 2</div>
+  <h2>Component Architecture</h2>
+
+  <div class="arch-diagram">
+
+    <!-- LEFT: Caller/Client side -->
+    <div>
+      <div class="arch-col-title">Caller / Client Side</div>
+      <div class="arch-box ab-muted">
+        <div class="arch-box-name">PSTN / SIP Caller</div>
+        <div class="arch-box-desc">Customer dials a number. Audio routed via SIP trunk to LiveKit.</div>
+      </div>
+      <div class="arch-box ab-muted" style="margin-top:6px">
+        <div class="arch-box-name">Web Browser</div>
+        <div class="arch-box-desc">WebRTC call from client's website. Token fetched from API first.</div>
+      </div>
+      <div class="arch-box ab-blue" style="margin-top:6px">
+        <div class="arch-box-name">Client Dashboard</div>
+        <div class="arch-box-desc">Next.js web app. Call logs, transcripts, settings, KB upload.</div>
+        <div class="arch-box-port"><span class="badge b-blue">Port 3002</span></div>
+      </div>
+      <div class="arch-box ab-orange" style="margin-top:6px">
+        <div class="arch-box-name">Admin Dashboard</div>
+        <div class="arch-box-desc">Next.js web app. Manage all clients, API keys, platform analytics.</div>
+        <div class="arch-box-port"><span class="badge b-orange">Port 3003</span></div>
+      </div>
+    </div>
+
+    <!-- ARROW 1 -->
+    <div class="arch-arrow">
+      <div>
+        <div class="arch-arrow-label">SIP / WebRTC</div>
+        <div class="arch-arrow-line"></div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="arch-arrow-label">HTTPS REST</div>
+        <div class="arch-arrow-line"></div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="arch-arrow-label">HTTPS REST</div>
+        <div class="arch-arrow-line"></div>
+      </div>
+    </div>
+
+    <!-- CENTRE: VM Core -->
+    <div>
+      <div class="arch-col-title highlight">▸ VM — All services self-hosted</div>
+      <div class="arch-box ab-teal">
+        <div class="arch-box-name">Caddy (Reverse Proxy)</div>
+        <div class="arch-box-desc">TLS termination. Routes subdomains to API, LiveKit, dashboards.</div>
+        <div class="arch-box-port"><span class="badge b-teal">80 / 443</span></div>
+      </div>
+      <div class="arch-box ab-teal" style="margin-top:6px">
+        <div class="arch-box-name">LiveKit Server</div>
+        <div class="arch-box-desc">Self-hosted WebRTC + SIP media server. Dispatches job to worker on each incoming call.</div>
+        <div class="arch-box-port"><span class="badge b-teal">7880 HTTP · 7881 RTP · 50000–60000 UDP</span></div>
+      </div>
+      <div class="arch-box ab-teal" style="margin-top:6px">
+        <div class="arch-box-name">Voice Agent Worker</div>
+        <div class="arch-box-desc">Python process. STT → LLM → TTS pipeline. Reads client config from DB. Saves transcript async. One process handles ~5 concurrent calls.</div>
+      </div>
+      <div class="arch-box ab-orange" style="margin-top:6px">
+        <div class="arch-box-name">FastAPI (REST API)</div>
+        <div class="arch-box-desc">All REST endpoints — call logs, transcripts, settings, KB upload, LiveKit token issuance.</div>
+        <div class="arch-box-port"><span class="badge b-orange">Port 8001</span></div>
+      </div>
+    </div>
+
+    <!-- ARROW 2 -->
+    <div class="arch-arrow">
+      <div>
+        <div class="arch-arrow-label">SQL</div>
+        <div class="arch-arrow-line"></div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="arch-arrow-label">Vector search</div>
+        <div class="arch-arrow-line"></div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="arch-arrow-label">HTTPS calls</div>
+        <div class="arch-arrow-line"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Data + External -->
+    <div>
+      <div class="arch-col-title">Data &amp; External APIs</div>
+      <div class="arch-box ab-purple">
+        <div class="arch-box-name">PostgreSQL</div>
+        <div class="arch-box-desc">All relational data. Clients, call logs, transcripts, summaries, settings.</div>
+        <div class="arch-box-port"><span class="badge b-purple">Port 5432 · Docker volume</span></div>
+      </div>
+      <div class="arch-box ab-purple" style="margin-top:6px">
+        <div class="arch-box-name">ChromaDB</div>
+        <div class="arch-box-desc">Vector store. One collection per client for RAG knowledge base queries.</div>
+        <div class="arch-box-port"><span class="badge b-purple">Port 8000 · Docker volume</span></div>
+      </div>
+      <div class="arch-box ab-yellow" style="margin-top:6px">
+        <div class="arch-box-name">Sarvam AI</div>
+        <div class="arch-box-desc">External API. STT — speech to text in 6 Indian languages. Per-client key.</div>
+      </div>
+      <div class="arch-box ab-yellow" style="margin-top:6px">
+        <div class="arch-box-name">LLM &amp; TTS APIs</div>
+        <div class="arch-box-desc">External APIs. Gemini / OpenAI (LLM). Cartesia / ElevenLabs (TTS). All per-client keys.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 3. CALL FLOW -->
+<div class="sec" id="s3">
+  <div class="sec-num">Section 3</div>
+  <h2>Call Flow — End to End</h2>
+
+  <h3>Phase 1 — Call setup</h3>
+  <div class="flow">
+    <div class="flow-node"><div class="flow-node-name">Caller</div><div class="flow-node-sub">dials / opens browser</div></div>
+    <div class="flow-arr"><div class="flow-arr-line"></div><div class="flow-tag">SIP / WebRTC</div></div>
+    <div class="flow-node"><div class="flow-node-name">LiveKit</div><div class="flow-node-sub">media server</div></div>
+    <div class="flow-arr"><div class="flow-arr-line"></div><div class="flow-tag">job dispatch</div></div>
+    <div class="flow-node"><div class="flow-node-name">Worker picks up</div><div class="flow-node-sub">reads room name</div></div>
+    <div class="flow-arr"><div class="flow-arr-line"></div><div class="flow-tag">extracts slug</div></div>
+    <div class="flow-node"><div class="flow-node-name">PostgreSQL</div><div class="flow-node-sub">fetch client config + keys</div></div>
+    <div class="flow-arr"><div class="flow-arr-line"></div><div class="flow-tag">ready</div></div>
+    <div class="flow-node"><div class="flow-node-name">Call active</div><div class="flow-node-sub">pipeline starts</div></div>
+  </div>
+
+  <h3>Phase 2 — Conversation loop (repeats each turn)</h3>
+  <div class="flow">
+    <div class="flow-node"><div class="flow-node-name">Audio in</div><div class="flow-node-sub">from caller</div></div>
+    <div class="flow-arr"><div class="flow-arr-line"></div><div class="flow-tag">PCM stream</div></div>
+    <div class="flow-node" style="border-color:rgba(245,166,35,.3)"><div class="flow-node-name">Sarvam STT</div><div class="flow-node-sub">speech → text</div></div>
+    <div class="flow-arr"><div class="flow-arr-line"></div><div class="flow-tag">+ KB RAG</div></div>
+    <div class="flow-node" style="border-color:rgba(245,166,35,.3)"><div class="flow-node-name">Gemini / OpenAI</div><div class="flow-node-sub">LLM generates reply</div></div>
+    <div class="flow-arr"><div class="flow-arr-line"></div><div class="flow-tag">reply text</div></div>
+    <div class="flow-node" style="border-color:rgba(245,166,35,.3)"><div class="flow-node-name">Cartesia TTS</div><div class="flow-node-sub">text → audio</div></div>
+    <div class="flow-arr"><div class="flow-arr-line"></div><div class="flow-tag">async write</div></div>
+    <div class="flow-node" style="border-color:rgba(167,139,250,.3)"><div class="flow-node-name">PostgreSQL</div><div class="flow-node-sub">transcript saved</div></div>
+  </div>
+
+  <div class="note teal" style="margin-top:12px">
+    <strong>Multi-tenancy in the call setup:</strong> The LiveKit room name is formatted as <code>client-{slug}-{uuid}</code>. The worker extracts the slug (e.g. <code>apollo</code>), runs <code>SELECT * FROM clients WHERE slug = 'apollo'</code>, and loads that client's API keys and agent settings. All API calls during the call use that client's own keys — no shared quota.
+  </div>
+  <div class="note">
+    <strong>Transcript is non-blocking:</strong> The transcript write to PostgreSQL is fired as a background async task (<code>asyncio.create_task</code>). It does not add latency to the conversation turn.
+  </div>
+</div>
+
+<!-- 4. PROCESSES & RESOURCES -->
+<div class="sec" id="s4">
+  <div class="sec-num">Section 4</div>
+  <h2>Running Processes &amp; Resource Requirements</h2>
+
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th style="width:170px">Process</th>
+        <th style="width:70px">Type</th>
+        <th style="width:120px">RAM (idle → peak)</th>
+        <th style="width:140px">CPU</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tn">caddy</span></td>
+        <td><span class="badge b-blue">Infra</span></td>
+        <td><span class="tm">30 – 50 MB</span></td>
+        <td class="tnote">Negligible</td>
+        <td class="tnote">Reverse proxy + auto TLS. Routes all inbound traffic by subdomain.</td>
+      </tr>
+      <tr>
+        <td><span class="tn">livekit-server</span></td>
+        <td><span class="badge b-teal">Media</span></td>
+        <td><span class="tm">150 – 400 MB</span></td>
+        <td class="tnote">~0.2 core base + 0.1 core per active call</td>
+        <td class="tnote">Self-hosted binary. Manages WebRTC rooms, SIP sessions, dispatches worker jobs. UDP ports 50000–60000 must be open.</td>
+      </tr>
+      <tr>
+        <td><span class="tn">voice-agent worker</span></td>
+        <td><span class="badge b-teal">Core</span></td>
+        <td><span class="tm">200 – 500 MB</span></td>
+        <td class="tnote">~0.3 core per active call</td>
+        <td class="tnote">Python process. STT → LLM → TTS pipeline. One instance handles ~5 concurrent calls. Scale by running multiple instances.</td>
+      </tr>
+      <tr>
+        <td><span class="tn">uvicorn (FastAPI)</span></td>
+        <td><span class="badge b-orange">API</span></td>
+        <td><span class="tm">80 – 200 MB</span></td>
+        <td class="tnote">Low (I/O bound)</td>
+        <td class="tnote">REST API. Run 2–4 workers. Handles all dashboard and agent API calls.</td>
+      </tr>
+      <tr>
+        <td><span class="tn">postgres (Docker)</span></td>
+        <td><span class="badge b-purple">Data</span></td>
+        <td><span class="tm">100 – 300 MB</span></td>
+        <td class="tnote">Low; spikes on bulk writes</td>
+        <td class="tnote">All relational data. Data on a separate persistent Docker volume. Needs daily pg_dump backup.</td>
+      </tr>
+      <tr>
+        <td><span class="tn">chromadb (Docker)</span></td>
+        <td><span class="badge b-purple">Data</span></td>
+        <td><span class="tm">100 – 400 MB</span></td>
+        <td class="tnote">Spikes on document ingest / embed</td>
+        <td class="tnote">Vector store. Internal only — not exposed externally. Scales with document count across all clients.</td>
+      </tr>
+      <tr>
+        <td><span class="tn">next.js (client UI)</span></td>
+        <td><span class="badge b-blue">Frontend</span></td>
+        <td><span class="tm">150 – 250 MB</span></td>
+        <td class="tnote">Minimal at runtime</td>
+        <td class="tnote">Client-facing dashboard. Port 3002.</td>
+      </tr>
+      <tr>
+        <td><span class="tn">next.js (admin UI)</span></td>
+        <td><span class="badge b-orange">Frontend</span></td>
+        <td><span class="tm">100 – 200 MB</span></td>
+        <td class="tnote">Minimal at runtime</td>
+        <td class="tnote">Platform admin dashboard. Port 3003.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="tbl">
+    <thead>
+      <tr><th>Scenario</th><th>Total RAM needed</th><th>Total CPU needed</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="tnote">All processes idle (no active calls)</td>
+        <td><span class="tm">~1.2 – 2.0 GB</span></td>
+        <td class="tnote">~1.0 core</td>
+      </tr>
+      <tr>
+        <td class="tnote">5 concurrent calls</td>
+        <td><span class="tm">~2.5 – 3.5 GB</span></td>
+        <td class="tnote">~2.5 – 3.0 cores</td>
+      </tr>
+      <tr>
+        <td class="tnote">10 concurrent calls</td>
+        <td><span class="tm">~3.5 – 5.0 GB</span></td>
+        <td class="tnote">~4.0 – 5.0 cores</td>
+      </tr>
+      <tr>
+        <td class="tnote">20 concurrent calls</td>
+        <td><span class="tm">~6.0 – 8.5 GB</span></td>
+        <td class="tnote">~7.0 – 9.0 cores</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 5. STORAGE -->
+<div class="sec" id="s5">
+  <div class="sec-num">Section 5</div>
+  <h2>Storage Requirements</h2>
+
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th style="width:180px">Volume / Path</th>
+        <th style="width:140px">Pilot size</th>
+        <th style="width:160px">Growth rate</th>
+        <th>Contents</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tc">/data/postgres</span></td>
+        <td><span class="tm">10 – 20 GB</span></td>
+        <td class="tnote">~3–5 GB / month per active client</td>
+        <td class="tnote">Call logs, full transcripts (every utterance), call summaries, agent settings, client config + API keys.</td>
+      </tr>
+      <tr>
+        <td><span class="tc">/data/chroma</span></td>
+        <td><span class="tm">2 – 10 GB</span></td>
+        <td class="tnote">~500 MB per 1000 documents</td>
+        <td class="tnote">Vector embeddings for all client knowledge bases. One ChromaDB collection per client (<code>kb_{client_id}</code>).</td>
+      </tr>
+      <tr>
+        <td><span class="tc">/data/uploads</span></td>
+        <td><span class="tm">5 – 20 GB</span></td>
+        <td class="tnote">Depends on client KB activity</td>
+        <td class="tnote">Raw files uploaded by clients (PDF, DOCX, TXT). Processed into ChromaDB — originals can be archived to object storage after embedding.</td>
+      </tr>
+      <tr>
+        <td><span class="tc">/data/livekit</span></td>
+        <td><span class="tm">&lt; 1 GB</span></td>
+        <td class="tnote">Static</td>
+        <td class="tnote">LiveKit config and room state only. Audio is not recorded — it streams live and is discarded after the call.</td>
+      </tr>
+      <tr>
+        <td><span class="tc">OS + app code</span></td>
+        <td><span class="tm">~8 – 12 GB</span></td>
+        <td class="tnote">Static</td>
+        <td class="tnote">Ubuntu OS, Docker images, Node modules, Python packages, application code.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <strong>Recommended disk layout:</strong> OS disk (80 GB SSD for OS + app) + separate data volume (50 GB at launch, expandable). Mount <code>/data</code> on the separate volume. This way you can resize the data disk without touching the OS.
+  </div>
+  <div class="note blue">
+    <strong>Backup policy:</strong> Run <code>pg_dump</code> daily to a separate location (S3-compatible object storage). ChromaDB has no built-in backup — periodically snapshot <code>/data/chroma</code> using the VM snapshot feature. Uploads directory should be mirrored to object storage in real time.
+  </div>
+</div>
+
+<!-- 6. NETWORK & PORTS -->
+<div class="sec" id="s6">
+  <div class="sec-num">Section 6</div>
+  <h2>Network &amp; Port Map</h2>
+
+  <table class="tbl port-tbl">
+    <thead>
+      <tr>
+        <th style="width:120px">Port / Protocol</th>
+        <th style="width:130px">Service</th>
+        <th style="width:100px">Exposure</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tm">80 / TCP</span></td>
+        <td class="tnote">Caddy</td>
+        <td><span class="badge b-blue">Public</span></td>
+        <td class="tnote">HTTP → redirects to HTTPS</td>
+      </tr>
+      <tr>
+        <td><span class="tm">443 / TCP</span></td>
+        <td class="tnote">Caddy</td>
+        <td><span class="badge b-blue">Public</span></td>
+        <td class="tnote">HTTPS — entry point for all web traffic. Routes to API / dashboards / LiveKit</td>
+      </tr>
+      <tr>
+        <td><span class="tm">7880 / TCP</span></td>
+        <td class="tnote">LiveKit</td>
+        <td><span class="badge b-muted">Internal / proxied</span></td>
+        <td class="tnote">LiveKit HTTP API and WebSocket signalling (proxied by Caddy)</td>
+      </tr>
+      <tr>
+        <td><span class="tm">7881 / TCP</span></td>
+        <td class="tnote">LiveKit</td>
+        <td><span class="badge b-blue">Public</span></td>
+        <td class="tnote">WebRTC TCP fallback (when UDP is blocked)</td>
+      </tr>
+      <tr>
+        <td><span class="tm">50000–60000 / UDP</span></td>
+        <td class="tnote">LiveKit RTP</td>
+        <td><span class="badge b-blue">Public</span></td>
+        <td class="tnote"><strong>Critical.</strong> RTP media (audio). Must be open in firewall. LiveKit uses this range for all active call audio.</td>
+      </tr>
+      <tr>
+        <td><span class="tm">5060 / UDP+TCP</span></td>
+        <td class="tnote">SIP</td>
+        <td><span class="badge b-blue">Public</span></td>
+        <td class="tnote">SIP signalling from SIP trunk provider. Required for PSTN / phone number calls.</td>
+      </tr>
+      <tr>
+        <td><span class="tm">8001 / TCP</span></td>
+        <td class="tnote">FastAPI</td>
+        <td><span class="badge b-muted">Internal / proxied</span></td>
+        <td class="tnote">REST API — proxied by Caddy. Not directly accessible from public internet.</td>
+      </tr>
+      <tr>
+        <td><span class="tm">3002 / TCP</span></td>
+        <td class="tnote">Client dashboard</td>
+        <td><span class="badge b-muted">Internal / proxied</span></td>
+        <td class="tnote">Next.js client UI — proxied by Caddy</td>
+      </tr>
+      <tr>
+        <td><span class="tm">3003 / TCP</span></td>
+        <td class="tnote">Admin dashboard</td>
+        <td><span class="badge b-muted">Internal / proxied</span></td>
+        <td class="tnote">Next.js admin UI — proxied by Caddy</td>
+      </tr>
+      <tr>
+        <td><span class="tm">5432 / TCP</span></td>
+        <td class="tnote">PostgreSQL</td>
+        <td><span class="badge b-red">Internal only</span></td>
+        <td class="tnote">Never expose to public internet. Only accessible within the VM.</td>
+      </tr>
+      <tr>
+        <td><span class="tm">8000 / TCP</span></td>
+        <td class="tnote">ChromaDB</td>
+        <td><span class="badge b-red">Internal only</span></td>
+        <td class="tnote">Never expose to public internet. Only accessed by FastAPI and voice agent.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note red">
+    <strong>Firewall rules summary:</strong> Open inbound 80, 443, 7881, 50000–60000 (UDP), 5060. Block everything else including 5432 and 8000. The UDP range 50000–60000 is mandatory for voice to work — if this is blocked, calls will fail or fall back to TCP with high latency.
+  </div>
+</div>
+
+<!-- 7. VM SIZING -->
+<div class="sec" id="s7">
+  <div class="sec-num">Section 7</div>
+  <h2>VM Sizing &amp; Scaling Tiers</h2>
+
+  <div class="scale-grid">
+    <div class="scale-card">
+      <div class="scale-tier" style="color:var(--teal)">Tier 1 — Pilot</div>
+      <div class="scale-clients">1 – 5 clients</div>
+      <div class="scale-calls">Up to 10 concurrent calls</div>
+      <div class="scale-spec">
+        4 vCPU<br>
+        8 GB RAM<br>
+        80 GB OS disk<br>
+        50 GB data volume<br>
+        5 TB bandwidth / mo
+      </div>
+      <div class="scale-cost">~$40 – 50 / month<br><span style="font-size:10px;color:var(--muted);font-weight:400">(Vultr Mumbai)</span></div>
+    </div>
+    <div class="scale-card">
+      <div class="scale-tier" style="color:var(--blue)">Tier 2 — Growth</div>
+      <div class="scale-clients">5 – 15 clients</div>
+      <div class="scale-calls">Up to 30 concurrent calls</div>
+      <div class="scale-spec">
+        8 vCPU<br>
+        16 GB RAM<br>
+        160 GB OS disk<br>
+        200 GB data volume<br>
+        10 TB bandwidth / mo
+      </div>
+      <div class="scale-cost">~$90 – 110 / month<br><span style="font-size:10px;color:var(--muted);font-weight:400">(Vultr Mumbai)</span></div>
+    </div>
+    <div class="scale-card">
+      <div class="scale-tier" style="color:var(--orange)">Tier 3 — Scale</div>
+      <div class="scale-clients">15+ clients</div>
+      <div class="scale-calls">50+ concurrent calls</div>
+      <div class="scale-spec">
+        16 vCPU<br>
+        32 GB RAM<br>
+        200 GB OS disk<br>
+        500 GB data volume<br>
+        Separate DB node
+      </div>
+      <div class="scale-cost">~$200 – 300 / month<br><span style="font-size:10px;color:var(--muted);font-weight:400">(consider K3s at this point)</span></div>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:14px">
+    <strong>Scaling trigger — voice agent worker:</strong> The worker is the first bottleneck. Each Python process handles ~5 concurrent calls. At Tier 1, run 2 worker processes (10 concurrent calls). At Tier 2, run 6 worker processes (30 concurrent calls). Workers are stateless and can be added without downtime.
+  </div>
+  <div class="note blue">
+    <strong>Audio bandwidth:</strong> LiveKit streams audio at ~50–80 kbps per call leg. At 10 concurrent calls that is ~1.5 Mbps sustained. The 5 TB/month included on Vultr is far more than enough — audio does not dominate bandwidth cost.
+  </div>
+</div>
+
+<!-- 8. MULTI-TENANCY -->
+<div class="sec" id="s8">
+  <div class="sec-num">Section 8</div>
+  <h2>Multi-tenancy — How It Works</h2>
+
+  <h3>Client isolation in PostgreSQL</h3>
+  <p style="margin-bottom:12px;font-size:12.5px">Every table has a <code>client_id UUID</code> column. Every query from the API is filtered by this column. Client A can never read or write Client B's data. No separate schema or database per client is needed.</p>
+
+  <table class="tbl">
+    <thead><tr><th>Table</th><th>client_id present</th><th>What it isolates</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tn">clients</span></td><td><span class="badge b-teal">Primary key table</span></td><td class="tnote">Company name, slug, is_active, all API keys</td></tr>
+      <tr><td><span class="tn">call_logs</span></td><td><span class="badge b-blue">FK → clients</span></td><td class="tnote">Every call record</td></tr>
+      <tr><td><span class="tn">transcripts</span></td><td><span class="badge b-blue">FK → clients</span></td><td class="tnote">Every utterance (user + agent)</td></tr>
+      <tr><td><span class="tn">call_summaries</span></td><td><span class="badge b-blue">FK → clients</span></td><td class="tnote">LLM-generated summaries, categories, action items</td></tr>
+      <tr><td><span class="tn">agent_settings</span></td><td><span class="badge b-blue">Composite PK (client_id, key)</span></td><td class="tnote">Per-client agent config (language, voice, persona)</td></tr>
+      <tr><td><span class="tn">knowledge_documents</span></td><td><span class="badge b-blue">FK → clients</span></td><td class="tnote">Uploaded file metadata</td></tr>
+      <tr><td><span class="tn">client_users</span></td><td><span class="badge b-blue">FK → clients</span></td><td class="tnote">Dashboard login email + bcrypt password</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Client isolation in ChromaDB</h3>
+  <p style="margin:10px 0 12px;font-size:12.5px">Each client gets their own ChromaDB collection named <code>kb_{client_id}</code>. The voice agent queries only the collection for the active client. Documents never cross clients.</p>
+
+  <h3>How the voice agent knows which client is calling</h3>
+  <div class="note teal">
+    <strong>Room name encoding:</strong> When a call starts, the LiveKit room is named <code>client-{slug}-{uuid}</code> (e.g. <code>client-apollo-a3f2b1</code>). The voice agent worker receives the room name with the job, splits on <code>-</code>, and extracts the slug. It then runs <code>SELECT * FROM clients WHERE slug = 'apollo'</code> to load that client's full configuration — API keys, agent settings, language preference — before the first audio frame is processed.
+  </div>
+</div>
+
+<!-- 9. TECH STACK -->
+<div class="sec" id="s9">
+  <div class="sec-num">Section 9</div>
+  <h2>Technology Stack</h2>
+
+  <table class="tbl">
+    <thead><tr><th style="width:160px">Layer</th><th style="width:180px">Technology</th><th>Version / Notes</th></tr></thead>
+    <tbody>
+      <tr><td class="tnote">Media server</td><td><span class="tn">LiveKit</span></td><td class="tnote">Self-hosted binary. WebRTC + SIP. Apache 2.0 license, free to self-host.</td></tr>
+      <tr><td class="tnote">Voice agent framework</td><td><span class="tn">LiveKit Agents SDK</span></td><td class="tnote">Python. Provides STT / LLM / TTS pipeline abstractions and job dispatch.</td></tr>
+      <tr><td class="tnote">STT</td><td><span class="tn">Sarvam AI</span></td><td class="tnote">6 Indian languages. Per-client API key. Pluggable — can swap per client.</td></tr>
+      <tr><td class="tnote">LLM</td><td><span class="tn">Google Gemini / OpenAI GPT</span></td><td class="tnote">Configurable per client. Gemini 2.0 Flash is default (cost-efficient).</td></tr>
+      <tr><td class="tnote">TTS</td><td><span class="tn">Cartesia / ElevenLabs / Sarvam</span></td><td class="tnote">Configurable per client.</td></tr>
+      <tr><td class="tnote">REST API</td><td><span class="tn">FastAPI + SQLAlchemy</span></td><td class="tnote">Python. Async. Uvicorn server.</td></tr>
+      <tr><td class="tnote">Database</td><td><span class="tn">PostgreSQL 15</span></td><td class="tnote">Docker. Persistent volume. SQLAlchemy ORM.</td></tr>
+      <tr><td class="tnote">Vector store</td><td><span class="tn">ChromaDB</span></td><td class="tnote">Docker. Persistent volume. Collection per client.</td></tr>
+      <tr><td class="tnote">Client dashboard</td><td><span class="tn">Next.js 14</span></td><td class="tnote">TypeScript. App router. Port 3002.</td></tr>
+      <tr><td class="tnote">Admin dashboard</td><td><span class="tn">Next.js 14</span></td><td class="tnote">TypeScript. App router. Port 3003. Separate app at <code>admin/</code>.</td></tr>
+      <tr><td class="tnote">Reverse proxy</td><td><span class="tn">Caddy 2</span></td><td class="tnote">Auto TLS via Let's Encrypt. Subdomain routing.</td></tr>
+      <tr><td class="tnote">Containerisation</td><td><span class="tn">Docker + Docker Compose</span></td><td class="tnote">PostgreSQL and ChromaDB run as Docker containers. Other services run as native processes.</td></tr>
+      <tr><td class="tnote">OS</td><td><span class="tn">Ubuntu 22.04 LTS</span></td><td class="tnote">Recommended. LTS support until 2027.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 10. DEPLOYMENT CHECKLIST -->
+<div class="sec" id="s10">
+  <div class="sec-num">Section 10</div>
+  <h2>Deployment Checklist</h2>
+
+  <table class="tbl">
+    <thead><tr><th style="width:40px">#</th><th style="width:200px">Task</th><th>Details</th></tr></thead>
+    <tbody>
+      <tr><td class="tnote">1</td><td class="tnote">Provision VM</td><td class="tnote">4 vCPU / 8 GB RAM, Ubuntu 22.04, Vultr Mumbai. Attach 50 GB data volume at <code>/data</code>.</td></tr>
+      <tr><td class="tnote">2</td><td class="tnote">Configure firewall</td><td class="tnote">Open: 80, 443, 7881 TCP; 50000–60000 UDP; 5060 UDP+TCP. Block: 5432, 8000.</td></tr>
+      <tr><td class="tnote">3</td><td class="tnote">Install Docker</td><td class="tnote">Docker Engine + Docker Compose v2. Add deploy user to <code>docker</code> group.</td></tr>
+      <tr><td class="tnote">4</td><td class="tnote">Install LiveKit</td><td class="tnote">Download LiveKit server binary. Configure with <code>livekit.yaml</code> — set node IP, Redis (optional), SIP trunk.</td></tr>
+      <tr><td class="tnote">5</td><td class="tnote">Start PostgreSQL</td><td class="tnote"><code>docker compose up -d postgres</code>. Run Alembic migrations. Create default admin client row.</td></tr>
+      <tr><td class="tnote">6</td><td class="tnote">Start ChromaDB</td><td class="tnote"><code>docker compose up -d chromadb</code>. Verify accessible at <code>localhost:8000</code>.</td></tr>
+      <tr><td class="tnote">7</td><td class="tnote">Deploy FastAPI</td><td class="tnote">Install Python deps. Configure <code>.env</code> (DATABASE_URL, LIVEKIT_URL, LIVEKIT_API_KEY). Start uvicorn.</td></tr>
+      <tr><td class="tnote">8</td><td class="tnote">Deploy voice agent worker</td><td class="tnote">Install Python deps. Configure <code>.env</code>. Start 2 worker processes. Verify they connect to LiveKit and appear in the LiveKit admin panel.</td></tr>
+      <tr><td class="tnote">9</td><td class="tnote">Deploy Next.js apps</td><td class="tnote"><code>npm run build</code> for both <code>frontend/</code> and <code>admin/</code>. Start with <code>npm start</code> or use PM2.</td></tr>
+      <tr><td class="tnote">10</td><td class="tnote">Configure Caddy</td><td class="tnote">Set up <code>Caddyfile</code> with subdomain routes. Caddy auto-provisions TLS. Point DNS A records to VM IP.</td></tr>
+      <tr><td class="tnote">11</td><td class="tnote">SIP trunk</td><td class="tnote">Configure SIP trunk (Twilio / Exotel) to point at VM IP port 5060. Add inbound SIP grant in LiveKit config.</td></tr>
+      <tr><td class="tnote">12</td><td class="tnote">Test end-to-end</td><td class="tnote">Make a test call via browser and via phone number. Verify transcript appears in dashboard. Verify client isolation.</td></tr>
+      <tr><td class="tnote">13</td><td class="tnote">Backup jobs</td><td class="tnote">Set up daily <code>pg_dump</code> cron job. Set up nightly <code>/data/chroma</code> snapshot.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="footer">
+  <span>RECEP Platform — Technical Architecture — Confidential</span>
+  <span>June 2026 · v1.0</span>
+</div>
+
+</body>
+</html>

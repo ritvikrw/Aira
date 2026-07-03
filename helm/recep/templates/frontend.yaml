@@ -1,0 +1,38 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recep-frontend
+  namespace: recep-{{ .Values.client.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recep-frontend
+  template:
+    metadata:
+      labels:
+        app: recep-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: {{ .Values.image.frontend }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              value: "https://{{ .Values.client.name }}.{{ .Values.client.domain }}/api"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recep-frontend
+  namespace: recep-{{ .Values.client.name }}
+spec:
+  selector:
+    app: recep-frontend
+  ports:
+    - port: 3000
+      targetPort: 3000

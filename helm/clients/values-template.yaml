@@ -1,0 +1,47 @@
+# Copy this file → values-<clientname>.yaml and fill in all fields
+
+client:
+  name: clientname                     # lowercase, no spaces (used in namespace + URL)
+  domain: recep.yourdomain.com
+
+agent:
+  orgName: "Client Company Name"
+  orgDescription: "What the company does in one line"
+  agentName: "aira"                    # receptionist's name
+  defaultLanguage: "en-IN"            # en-IN hi-IN ta-IN te-IN kn-IN ml-IN
+  selectedVoiceId: "cartesia:f039066f-cdb7-45ed-b51d-1034ae2f04a0"
+  businessHours: "Monday to Friday, 9am to 6pm IST"
+  humanEscalation: "Our team will call you back within 2 hours"
+  topicsToAvoid: ""
+  customInstructions: ""
+
+secrets:
+  openaiApiKey: "sk-..."
+  sarvamApiKey: "..."
+  cartesiaApiKey: "..."
+  deepgramApiKey: "..."
+  langfusePublicKey: "pk-lf-..."
+  langfuseSecretKey: "sk-lf-..."
+  livekitApiKey: "..."
+  livekitApiSecret: "..."
+
+livekit:
+  url: "wss://your-livekit-host"
+
+image:
+  api: "your-registry/recep-api:latest"
+  voiceAgent: "your-registry/recep-voice-agent:latest"
+  frontend: "your-registry/recep-frontend:latest"
+  pullPolicy: IfNotPresent
+
+postgres:
+  user: recep
+  password: recep
+  db: recep
+  storageSize: 5Gi
+
+chroma:
+  storageSize: 5Gi
+
+uploads:
+  storageSize: 2Gi

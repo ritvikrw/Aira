@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: recep-ingress
+  namespace: recep-{{ .Values.client.name }}
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - {{ .Values.client.name }}.{{ .Values.client.domain }}
+      secretName: recep-tls-{{ .Values.client.name }}
+  rules:
+    - host: {{ .Values.client.name }}.{{ .Values.client.domain }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: recep-api
+                port:
+                  number: 8001
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: recep-frontend
+                port:
+                  number: 3000

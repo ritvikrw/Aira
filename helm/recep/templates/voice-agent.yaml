@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recep-voice-agent
+  namespace: recep-{{ .Values.client.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recep-voice-agent
+  template:
+    metadata:
+      labels:
+        app: recep-voice-agent
+    spec:
+      containers:
+        - name: voice-agent
+          image: {{ .Values.image.voiceAgent }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: recep-config
+            - secretRef:
+                name: recep-secrets
+          env:
+            - name: LIVEKIT_URL
+              value: {{ .Values.livekit.url | quote }}

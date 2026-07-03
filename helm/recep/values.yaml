@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────
+# Default values — override per client
+# ─────────────────────────────────────────────
+
+client:
+  name: demo                          # used as namespace + label
+  domain: recep.yourdomain.com        # base domain; client gets <name>.<domain>
+
+# ── Agent config (stored in DB on first boot) ──
+agent:
+  orgName: "Demo Company"
+  orgDescription: ""
+  agentName: "aira"
+  defaultLanguage: "en-IN"           # en-IN hi-IN ta-IN te-IN kn-IN ml-IN
+  selectedVoiceId: "cartesia:f039066f-cdb7-45ed-b51d-1034ae2f04a0"
+  businessHours: ""
+  humanEscalation: ""
+  topicsToAvoid: ""
+  customInstructions: ""
+
+# ── API keys (put real values in a client-specific values file) ──
+secrets:
+  openaiApiKey: ""
+  sarvamApiKey: ""
+  cartesiaApiKey: ""
+  deepgramApiKey: ""
+  langfusePublicKey: ""
+  langfuseSecretKey: ""
+  livekitApiKey: ""
+  livekitApiSecret: ""
+
+# ── LiveKit (use a shared LiveKit cloud or self-hosted) ──
+livekit:
+  url: "wss://your-livekit-host"
+
+# ── Images ──
+image:
+  api: "your-registry/recep-api:latest"
+  voiceAgent: "your-registry/recep-voice-agent:latest"
+  frontend: "your-registry/recep-frontend:latest"
+  pullPolicy: IfNotPresent
+
+# ── Postgres ──
+postgres:
+  user: recep
+  password: recep
+  db: recep
+  storageSize: 5Gi
+
+# ── ChromaDB + Uploads storage ──
+chroma:
+  storageSize: 5Gi
+
+uploads:
+  storageSize: 2Gi

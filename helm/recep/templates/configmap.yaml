@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: recep-config
+  namespace: recep-{{ .Values.client.name }}
+data:
+  LIVEKIT_URL: {{ .Values.livekit.url | quote }}
+  LLM_MODEL: "gpt-4o-mini"
+  CHROMA_PERSIST_PATH: "/data/chroma"
+  UPLOAD_DIR: "/data/uploads"
+  API_PORT: "8001"
+  API_BASE_URL: "http://recep-api:8001"
+  DATABASE_URL: "postgresql+asyncpg://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@recep-postgres:5432/{{ .Values.postgres.db }}"
+  DATABASE_URL_SYNC: "postgresql://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@recep-postgres:5432/{{ .Values.postgres.db }}"
+  LANGFUSE_HOST: "https://cloud.langfuse.com"

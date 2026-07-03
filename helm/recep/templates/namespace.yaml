@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: recep-{{ .Values.client.name }}
+  labels:
+    app: recep
+    client: {{ .Values.client.name }}
