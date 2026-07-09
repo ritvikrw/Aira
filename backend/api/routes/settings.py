@@ -53,7 +53,11 @@ AVAILABLE_LANGUAGES = [
     {"code": "pa-IN", "name": "Punjabi"},
 ]
 
-DEFAULTS = {"selected_voice_id": "cartesia:f039066f-cdb7-45ed-b51d-1034ae2f04a0", "default_language": "en-IN"}
+DEFAULTS = {
+    "selected_voice_id": "cartesia:f039066f-cdb7-45ed-b51d-1034ae2f04a0",
+    "default_language": "en-IN",
+    "agent_enabled": "false"
+}
 
 
 async def _read_all(db: AsyncSession) -> dict:

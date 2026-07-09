@@ -13,6 +13,7 @@ export default async function AgentSettingsPage() {
   let currentOrgName = ''
   let currentOrgDescription = ''
   let currentDefaultLanguage = 'en-IN'
+  let currentAgentEnabled = false
 
   try {
     const [voicesRes, languagesRes, settingsRes] = await Promise.all([
@@ -29,12 +30,14 @@ export default async function AgentSettingsPage() {
         org_name?: string
         org_description?: string
         default_language?: string
+        agent_enabled?: string
       }
       currentVoiceId = s.selected_voice_id || currentVoiceId
       currentAgentName = s.agent_name || currentAgentName
       currentOrgName = s.org_name || currentOrgName
       currentOrgDescription = s.org_description || currentOrgDescription
       currentDefaultLanguage = s.default_language || currentDefaultLanguage
+      currentAgentEnabled = s.agent_enabled === 'true'
     }
   } catch { /* ignore */ }
 
@@ -58,6 +61,7 @@ export default async function AgentSettingsPage() {
               currentOrgName={currentOrgName}
               currentOrgDescription={currentOrgDescription}
               currentDefaultLanguage={currentDefaultLanguage}
+              currentAgentEnabled={currentAgentEnabled}
             />
           </div>
         </div>

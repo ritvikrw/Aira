@@ -26,6 +26,7 @@ interface AgentSettingsFormProps {
   currentOrgName: string
   currentOrgDescription: string
   currentDefaultLanguage: string
+  currentAgentEnabled: boolean
 }
 
 export function AgentSettingsForm({
@@ -36,12 +37,14 @@ export function AgentSettingsForm({
   currentOrgName,
   currentOrgDescription,
   currentDefaultLanguage,
+  currentAgentEnabled,
 }: AgentSettingsFormProps) {
   const [voiceId, setVoiceId] = useState(currentVoiceId)
   const [agentName, setAgentName] = useState(currentAgentName)
   const [orgName, setOrgName] = useState(currentOrgName)
   const [orgDescription, setOrgDescription] = useState(currentOrgDescription)
   const [defaultLanguage, setDefaultLanguage] = useState(currentDefaultLanguage)
+  const [agentEnabled, setAgentEnabled] = useState(currentAgentEnabled)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -63,6 +66,7 @@ export function AgentSettingsForm({
         org_name: orgName.trim(),
         org_description: orgDescription.trim(),
         default_language: defaultLanguage,
+        agent_enabled: agentEnabled.toString(),
       }),
     })
     if (!res.ok) throw new Error('Failed to save')
@@ -158,6 +162,30 @@ export function AgentSettingsForm({
               className="w-full px-3 py-2 rounded-lg border border-brand-300 text-sm text-ink-900 placeholder-ink-300 focus:outline-none focus:ring-2 focus:ring-accent-400 focus:border-transparent resize-none"
             />
             <p className="text-xs text-ink-400 mt-1">Helps the agent understand what the organisation does so it can answer questions naturally</p>
+          </div>
+        </div>
+
+        {/* Call Answering Mode */}
+        <div className="bg-white rounded-xl border border-brand-300 p-6">
+          <div className="flex items-center justify-between">
+            <div className="pr-4">
+              <h2 className="text-sm font-semibold text-ink-900">AI Call Handler Status</h2>
+              <p className="text-xs text-ink-400 mt-1">
+                {agentEnabled 
+                  ? 'Active — The AI receptionist will automatically answer incoming calls.' 
+                  : 'Muted — The AI receptionist is disabled. Calls will ring normally for manual answer.'
+                }
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+              <input
+                type="checkbox"
+                checked={agentEnabled}
+                onChange={e => setAgentEnabled(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-brand-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-brand-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
+            </label>
           </div>
         </div>
 

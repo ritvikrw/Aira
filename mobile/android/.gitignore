@@ -1,0 +1,25 @@
+# Built artifacts
+build/
+.gradle/
+.kotlin/
+
+# Local configurations
+local.properties
+
+# Android Studio / IntelliJ files
+.idea/
+*.iml
+*.hprof
+
+# Built APKs/AABs
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Key files
+*.jks
+*.keystore
+
+# Device logs
+captures/

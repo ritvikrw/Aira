@@ -1,0 +1,8 @@
+pipecat-ai[google,sarvam,cartesia]>=0.3.2
+websockets>=12.0
+python-dotenv==1.0.1
+deepgram-sdk>=3.0.0
+httpx>=0.28.1
+asyncpg>=0.29.0
+fastapi>=0.139.0
+uvicorn>=0.51.0
