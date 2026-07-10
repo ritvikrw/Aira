@@ -25,14 +25,3 @@ chroma_data/
 # OS
 .DS_Store
 Thumbs.db
-
-# Android
-android/local.properties
-android/.gradle/
-android/.idea/
-android/*.iml
-android/.kotlin/
-android/app/build/
-android/build/
-android/captures/
-android/.cxx/
