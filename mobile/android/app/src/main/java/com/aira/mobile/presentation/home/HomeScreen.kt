@@ -395,7 +395,7 @@ fun HomeScreen(
                     onClick = {
                         telecomHelper.simulateIncomingCall(
                             callerName = "Test Call (Day 2)",
-                            callerNumber = "5550199"
+                            callerNumber = "12345"
                         )
                     },
                     colors = ButtonDefaults.buttonColors(

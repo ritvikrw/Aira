@@ -330,7 +330,7 @@ Transcript:
 {dialog}"""
 
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-3.5-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json"
@@ -596,7 +596,7 @@ async def run_pipeline(websocket: WebSocket):
     
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY_AIRA", "dummy_key"),
-        model="gemini-2.5-flash",
+        model="gemini-3.5-flash",
         system_instruction="You are AIRA, a prompt-based phone voice receptionist agent."
     )
     
@@ -758,17 +758,13 @@ async def run_pipeline(websocket: WebSocket):
         
         # Reset context history for the new call session
         context.messages.clear()
-        context.add_message({
-            "role": "system",
-            "content": system_prompt
-        })
         
         # Queue dynamic greeting message
         greeting = (
             f"Hi, this is {agent_name} from {org_name}! "
             f"Which language would you like to speak in?"
         )
-        await task.queue_frames([TTSSpeakFrame(text=greeting, append_to_context=True), LLMRunFrame()])
+        await task.queue_frames([TTSSpeakFrame(text=greeting, append_to_context=True)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, websocket_conn):
