@@ -19,6 +19,7 @@ from routes.transcripts import router as transcripts_router
 from routes.settings import router as settings_router
 from routes.internal import router as internal_router
 from routes.translate import router as translate_router
+from routes.livekit_token import router as livekit_token_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ app.include_router(kb_router)
 app.include_router(settings_router)
 app.include_router(internal_router)
 app.include_router(translate_router)
+app.include_router(livekit_token_router)
 
 
 @app.get("/health")
