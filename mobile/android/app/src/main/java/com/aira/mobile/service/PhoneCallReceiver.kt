@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.telecom.TelecomManager
 import android.telephony.TelephonyManager
 import android.util.Log
@@ -14,6 +15,8 @@ import java.util.Calendar
 class PhoneCallReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "PhoneCallReceiver"
+        private var lastIncomingNumber: String? = null
+        private var activeConnection: MyConnection? = null
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -25,6 +28,9 @@ class PhoneCallReceiver : BroadcastReceiver() {
         if (state == TelephonyManager.EXTRA_STATE_RINGING) {
             val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
             Log.i(TAG, "Incoming ringing call from: $incomingNumber")
+            if (incomingNumber != null) {
+                lastIncomingNumber = incomingNumber
+            }
 
             val prefs = context.getSharedPreferences("aira_prefs", Context.MODE_PRIVATE)
             val isEnabled = prefs.getBoolean("agent_enabled", false)
@@ -63,6 +69,25 @@ class PhoneCallReceiver : BroadcastReceiver() {
 
             Log.i(TAG, "AI Receptionist is enabled and call filters cleared, attempting to auto-answer call...")
             autoAnswerCall(context)
+        } else if (state == TelephonyManager.EXTRA_STATE_OFFHOOK) {
+            val prefs = context.getSharedPreferences("aira_prefs", Context.MODE_PRIVATE)
+            val isEnabled = prefs.getBoolean("agent_enabled", false)
+            if (isEnabled) {
+                Log.i(TAG, "Call went OFFHOOK (active). Initializing AI connection for number: $lastIncomingNumber")
+                if (activeConnection == null) {
+                    val connection = MyConnection(context)
+                    if (lastIncomingNumber != null) {
+                        connection.setAddress(Uri.fromParts("tel", lastIncomingNumber, null), TelecomManager.PRESENTATION_ALLOWED)
+                    }
+                    activeConnection = connection
+                    connection.initializingCall()
+                }
+            }
+        } else if (state == TelephonyManager.EXTRA_STATE_IDLE) {
+            Log.i(TAG, "Call went IDLE (disconnected). Cleaning up AI connection.")
+            activeConnection?.onDisconnect()
+            activeConnection = null
+            lastIncomingNumber = null
         }
     }
 

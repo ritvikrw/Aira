@@ -5,10 +5,12 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Build
 import android.telecom.Connection
 import android.telecom.DisconnectCause
 import android.util.Log
@@ -42,6 +44,8 @@ class MyConnection(private val context: Context) : Connection() {
     private val dbHelper = CallDatabaseHelper(context)
     private val sessionId = UUID.randomUUID().toString()
     private var callStartTime = 0L
+    private var originalAudioMode = AudioManager.MODE_NORMAL
+    private var originalSpeakerphoneState = false
 
     fun initializingCall() {
         val sharedPreferences = context.getSharedPreferences("aira_prefs", Context.MODE_PRIVATE)
@@ -230,6 +234,14 @@ class MyConnection(private val context: Context) : Connection() {
             return
         }
 
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        originalAudioMode = audioManager.mode
+        originalSpeakerphoneState = audioManager.isSpeakerphoneOn
+
+        // Set mode to IN_COMMUNICATION for call audio optimization
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        setSpeakerphoneEnabled(audioManager, true)
+
         val sampleRate = 16000
         val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
         val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
@@ -413,6 +425,13 @@ class MyConnection(private val context: Context) : Connection() {
             return
         }
 
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        originalAudioMode = audioManager.mode
+        originalSpeakerphoneState = audioManager.isSpeakerphoneOn
+
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        setSpeakerphoneEnabled(audioManager, true)
+
         val sampleRate = 16000
         val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
         val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
@@ -505,6 +524,15 @@ class MyConnection(private val context: Context) : Connection() {
         isRunning = false
         isCallActive = false
         MyConnectionService.stopForeground()
+
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        try {
+            audioManager.mode = originalAudioMode
+            setSpeakerphoneEnabled(audioManager, false)
+            Log.i(TAG, "Restored AudioManager mode to $originalAudioMode and cleared speakerphone")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error restoring AudioManager state", e)
+        }
         webSocket?.close(1000, "Call ended")
         webSocket = null
         try {
@@ -525,5 +553,27 @@ class MyConnection(private val context: Context) : Connection() {
             audioTrack = null
         }
         Log.i(TAG, "Audio devices released successfully")
+    }
+
+    private fun setSpeakerphoneEnabled(audioManager: AudioManager, enable: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (enable) {
+                val devices = audioManager.availableCommunicationDevices
+                val speakerDevice = devices.find { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                if (speakerDevice != null) {
+                    val result = audioManager.setCommunicationDevice(speakerDevice)
+                    Log.i(TAG, "setCommunicationDevice speakerphone result: $result")
+                } else {
+                    Log.w(TAG, "Built-in speaker device not found in available communication devices")
+                }
+            } else {
+                audioManager.clearCommunicationDevice()
+                Log.i(TAG, "clearCommunicationDevice speakerphone cleared")
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.isSpeakerphoneOn = enable
+            Log.i(TAG, "Legacy setSpeakerphoneOn: $enable")
+        }
     }
 }

@@ -596,7 +596,7 @@ async def run_pipeline(websocket: WebSocket):
     
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY_AIRA", "dummy_key"),
-        model="gemini-3.5-flash",
+        model="gemini-2.0-flash",
         system_instruction="You are AIRA, a prompt-based phone voice receptionist agent."
     )
     

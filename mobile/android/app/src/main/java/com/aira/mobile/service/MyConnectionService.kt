@@ -11,6 +11,7 @@ import android.telecom.Connection
 import android.telecom.ConnectionRequest
 import android.telecom.ConnectionService
 import android.telecom.PhoneAccountHandle
+import android.telecom.TelecomManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 
@@ -119,6 +120,9 @@ class MyConnectionService : ConnectionService() {
     ): Connection {
         Log.i(TAG, "onCreateIncomingConnection: Incoming call received, creating connection")
         val connection = MyConnection(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            connection.setAddress(request?.address, TelecomManager.PRESENTATION_ALLOWED)
+        }
         connection.initializingCall()
         return connection
     }
@@ -129,6 +133,9 @@ class MyConnectionService : ConnectionService() {
     ): Connection {
         Log.i(TAG, "onCreateOutgoingConnection: Creating outgoing connection")
         val connection = MyConnection(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            connection.setAddress(request?.address, TelecomManager.PRESENTATION_ALLOWED)
+        }
         connection.initializingCall()
         return connection
     }
