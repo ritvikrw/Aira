@@ -37,6 +37,11 @@ services:
       CHROMA_PERSIST_PATH: /data/chroma
       UPLOAD_DIR: /data/uploads
       API_PORT: "8001"
+      # Internal address the api container uses to talk to livekit for room creation.
+      LIVEKIT_URL: ws://livekit:7880
+      # Address handed back to callers (browser/mobile) to actually connect —
+      # override with your LAN IP (e.g. ws://192.168.1.x:7880) to test from a real device.
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
     volumes:
       - chroma_data:/data/chroma
       - upload_data:/data/uploads
