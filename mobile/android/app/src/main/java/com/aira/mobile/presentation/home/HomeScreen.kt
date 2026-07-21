@@ -11,6 +11,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -120,7 +122,6 @@ fun HomeScreen(
         ),
         label = "pulseScale"
     )
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -177,20 +178,25 @@ fun HomeScreen(
                 }
             }
 
-            // Central Status Bubble
+            // Scrollable Content Area
             Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp)
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier.weight(1f)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // Central Status Bubble
                 Box(
                     contentAlignment = Alignment.Center,
-                    modifier = Modifier.size(200.dp)
+                    modifier = Modifier.size(160.dp)
                 ) {
                     // Pulse ring
                     Box(
                         modifier = Modifier
-                            .size(160.dp)
+                            .size(140.dp)
                             .scale(if (agentEnabled) pulseScale else 1.0f)
                             .clip(CircleShape)
                             .background(indicatorColor.copy(alpha = 0.15f))
@@ -199,7 +205,7 @@ fun HomeScreen(
                     
                     // Main circle
                     Surface(
-                        modifier = Modifier.size(120.dp),
+                        modifier = Modifier.size(110.dp),
                         shape = CircleShape,
                         color = Color(0xFF23243C),
                         tonalElevation = 8.dp
@@ -212,62 +218,52 @@ fun HomeScreen(
                             Text(
                                 text = if (agentEnabled) "ACTIVE" else "MUTED",
                                 color = indicatorColor,
-                                fontSize = 18.sp,
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(16.dp))
-                
                 val statusLabel = when {
                     !agentEnabled -> "Agent Muted"
-                    agentStatus == MyConnection.AgentStatus.LISTENING -> "Listening..."
-                    agentStatus == MyConnection.AgentStatus.PROCESSING -> "Processing..."
-                    agentStatus == MyConnection.AgentStatus.SPEAKING -> "Speaking..."
+                    agentStatus == MyConnection.Companion.AgentStatus.LISTENING -> "Listening..."
+                    agentStatus == MyConnection.Companion.AgentStatus.PROCESSING -> "Processing..."
+                    agentStatus == MyConnection.Companion.AgentStatus.SPEAKING -> "Speaking..."
                     else -> "Awaiting Incoming Calls..."
                 }
                 val statusColor = when {
                     !agentEnabled -> Color.Gray
-                    agentStatus == MyConnection.AgentStatus.LISTENING -> Color(0xFF5A6BFA)
-                    agentStatus == MyConnection.AgentStatus.PROCESSING -> Color(0xFFFFC107)
-                    agentStatus == MyConnection.AgentStatus.SPEAKING -> Color(0xFF4CAF50)
+                    agentStatus == MyConnection.Companion.AgentStatus.LISTENING -> Color(0xFF5A6BFA)
+                    agentStatus == MyConnection.Companion.AgentStatus.PROCESSING -> Color(0xFFFFC107)
+                    agentStatus == MyConnection.Companion.AgentStatus.SPEAKING -> Color(0xFF4CAF50)
                     else -> Color.White
                 }
                 Text(
                     text = statusLabel,
                     color = statusColor,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Medium
                 )
 
                 if (agentEnabled) {
-                    Spacer(modifier = Modifier.height(12.dp))
                     AudioWaveformVisualizer(
                         volume = micVolume,
                         isBotSpeaking = botSpeaking,
-                        modifier = Modifier.padding(top = 8.dp)
+                        modifier = Modifier.padding(top = 4.dp)
                     )
                 }
-            }
 
-            // Controls & Metrics Card
-            Column(
-                modifier = Modifier.fillMaxWidth()
-            ) {
                 // Agent Toggle Control
                 Card(
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF23243C)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(20.dp),
+                            .padding(18.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -275,13 +271,13 @@ fun HomeScreen(
                             Text(
                                 text = "AI Call Handler Status",
                                 color = Color.White,
-                                fontSize = 16.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = if (agentEnabled) "Auto-answering calls active" else "Calls will ring standard UI",
                                 color = Color.Gray,
-                                fontSize = 12.sp
+                                fontSize = 11.sp
                             )
                         }
                         
@@ -306,9 +302,7 @@ fun HomeScreen(
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1B2F)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 12.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
@@ -322,17 +316,17 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text("STT", color = Color.Gray, fontSize = 10.sp)
-                                Text("Sarvam saarika:v2.5", color = Color.White, fontSize = 12.sp)
+                                Text("Sarvam saarika:v2.5", color = Color.White, fontSize = 11.sp)
                             }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("LLM", color = Color.Gray, fontSize = 10.sp)
-                                Text("Groq llama-3.1-8b", color = Color.White, fontSize = 12.sp)
+                                Text("Groq llama-3.1-8b", color = Color.White, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
-                            Column(horizontalAlignment = Alignment.End) {
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
                                 Text("TTS", color = Color.Gray, fontSize = 10.sp)
-                                Text("Cartesia Ramya", color = Color.White, fontSize = 12.sp)
+                                Text("Cartesia Ramya", color = Color.White, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.End)
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
@@ -370,7 +364,7 @@ fun HomeScreen(
 
                 // Navigation Cards Grid (2x2)
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Card(
@@ -378,11 +372,11 @@ fun HomeScreen(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35))
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(modifier = Modifier.padding(14.dp)) {
                             Icon(Icons.Default.Edit, contentDescription = null, tint = Color(0xFF8A9AFA))
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Agent Config", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("Edit prompt & name", color = Color.Gray, fontSize = 11.sp)
+                            Text("Agent Config", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Edit prompt & name", color = Color.Gray, fontSize = 10.sp)
                         }
                     }
                     Card(
@@ -390,16 +384,17 @@ fun HomeScreen(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35))
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(modifier = Modifier.padding(14.dp)) {
                             Icon(Icons.Default.Build, contentDescription = null, tint = Color(0xFF8A9AFA))
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Connection", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("Test WS server port", color = Color.Gray, fontSize = 11.sp)
+                            Text("Connection", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Test WS server port", color = Color.Gray, fontSize = 10.sp)
                         }
                     }
                 }
+
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Card(
@@ -407,11 +402,11 @@ fun HomeScreen(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35))
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(modifier = Modifier.padding(14.dp)) {
                             Icon(Icons.Default.List, contentDescription = null, tint = Color(0xFF8A9AFA))
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Call History", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("View transcripts", color = Color.Gray, fontSize = 11.sp)
+                            Text("Call History", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("View transcripts", color = Color.Gray, fontSize = 10.sp)
                         }
                     }
                     Card(
@@ -419,111 +414,107 @@ fun HomeScreen(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35))
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(modifier = Modifier.padding(14.dp)) {
                             Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF8A9AFA))
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Safety Settings", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("Blacklists & DND", color = Color.Gray, fontSize = 11.sp)
+                            Text("Safety Settings", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Blacklists & DND", color = Color.Gray, fontSize = 10.sp)
                         }
                     }
                 }
 
-                // Call Statistics / Setup Warnings Card
+                // Telecom Integration Status Card
                 Card(
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(
-                        modifier = Modifier.padding(18.dp)
-                    ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Text(
                             text = "Telecom Integration Status",
                             color = Color(0xFF8A9AFA),
-                            fontSize = 14.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         
-                        // Default Dialer Check
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = if (isDefaultDialer) Icons.Default.CheckCircle else Icons.Default.Warning,
                                 contentDescription = null,
                                 tint = if (isDefaultDialer) Color(0xFF4CAF50) else Color(0xFFFFC107),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = if (isDefaultDialer) "Default Phone Application: Yes" else "Default Phone Application: No",
                                 color = Color.LightGray,
-                                fontSize = 13.sp
+                                fontSize = 12.sp
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         
-                        // PhoneAccount Check
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = if (isPhoneAccountRegistered) Icons.Default.CheckCircle else Icons.Default.Warning,
                                 contentDescription = null,
                                 tint = if (isPhoneAccountRegistered) Color(0xFF4CAF50) else Color(0xFFFFC107),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = if (isPhoneAccountRegistered) "Telecom PhoneAccount: Registered" else "Telecom PhoneAccount: Missing",
                                 color = Color.LightGray,
-                                fontSize = 13.sp
+                                fontSize = 12.sp
                             )
                         }
                     }
                 }
+            }
 
-                if (isCallActive) {
-                    // End Call button — shown during active call
-                    Button(
-                        onClick = { MyConnection.activeConnection?.onDisconnect() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                    ) {
-                        Text(
-                            text = "End Call",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                } else {
-                    // Simulate button — shown when no call is active
-                    Button(
-                        onClick = { showSimulationDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5A6BFA)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                        Text(
-                            text = "Simulate Incoming Call",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (isCallActive) {
+                // End Call button — shown during active call
+                Button(
+                    onClick = { MyConnection.activeConnection?.onDisconnect() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                ) {
+                    Text(
+                        text = "End Call",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            } else {
+                // Simulate button — shown when no call is active
+                Button(
+                    onClick = { showSimulationDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5A6BFA)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    Text(
+                        text = "Simulate Incoming Call",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
 
-        // Simulation Dialog — prompt is the same as Agent Config's custom_instructions
+        // Simulation Dialog
         if (showSimulationDialog) {
             AlertDialog(
                 onDismissRequest = { showSimulationDialog = false },
@@ -565,7 +556,6 @@ fun HomeScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            // Save to SharedPrefs + server as custom_instructions
                             sharedPreferences.edit()
                                 .putString("custom_instructions", simulationPrompt)
                                 .apply()
