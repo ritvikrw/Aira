@@ -10,6 +10,9 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
+import android.media.audiofx.AutomaticGainControl
 import android.os.Build
 import android.telecom.Connection
 import android.telecom.DisconnectCause
@@ -321,13 +324,31 @@ class MyConnection(private val context: Context) : Connection() {
         }
 
         try {
+            // VOICE_COMMUNICATION gives us built-in AEC + NS on most devices
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 sampleRate,
                 channelConfigIn,
                 audioFormat,
                 bufferSize
             )
+
+            // Explicitly enable AEC, NS, AGC if the hardware supports it
+            val sessionId = audioRecord?.audioSessionId ?: 0
+            if (sessionId != 0) {
+                if (AcousticEchoCanceler.isAvailable()) {
+                    AcousticEchoCanceler.create(sessionId)?.enabled = true
+                    Log.i(TAG, "AcousticEchoCanceler enabled")
+                }
+                if (NoiseSuppressor.isAvailable()) {
+                    NoiseSuppressor.create(sessionId)?.enabled = true
+                    Log.i(TAG, "NoiseSuppressor enabled")
+                }
+                if (AutomaticGainControl.isAvailable()) {
+                    AutomaticGainControl.create(sessionId)?.enabled = true
+                    Log.i(TAG, "AutomaticGainControl enabled")
+                }
+            }
 
             val audioAttrs = if (isSimulation) {
                 AudioAttributes.Builder()

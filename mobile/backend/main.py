@@ -50,6 +50,7 @@ from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 # Import VAD with dynamic import protection for onnxruntime DLL issue on Windows
 try:
     from pipecat.audio.vad.silero import SileroVADAnalyzer
+    from pipecat.audio.vad.vad_analyzer import VADParams
     from pipecat.processors.audio.vad_processor import VADProcessor
     _VAD_AVAILABLE = True
 except Exception as e:
@@ -71,6 +72,11 @@ from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair, LLMUserAggregatorParams
 from pipecat.turns.user_turn_strategies import UserTurnStrategies, TranscriptionUserTurnStartStrategy, ExternalUserTurnStopStrategy
+try:
+    from pipecat.turns.user_turn_strategies import VADUserTurnStartStrategy
+    _VAD_TURN_STRAT_AVAILABLE = True
+except Exception:
+    _VAD_TURN_STRAT_AVAILABLE = False
 
 # Import prompt builder
 from prompts import build_prompt
@@ -498,6 +504,7 @@ class TranscriptInterceptor(FrameProcessor):
         self.org_name = ""
         self.org_description = ""
         self.instructions = ""
+        self.current_system_prompt = ""
         self.current_agent_response = []
         self.caller_name_saved = False
         self.language_locked = False
@@ -514,9 +521,20 @@ class TranscriptInterceptor(FrameProcessor):
         
         if isinstance(frame, TranscriptionFrame):
             text = frame.text
+            # Filter out noise / echo transcripts — too short or empty
+            if not text or len(text.strip()) < 4:
+                logger.info(f"Dropping noisy transcript: {text!r}")
+                return
             logger.info(f"User transcript: {text}")
             sess_id = self.get_session_id()
             asyncio.create_task(save_transcript(sess_id, "user", text))
+
+            # Bulletproof: ensure system prompt is present before every LLM call
+            if self.context and self.current_system_prompt:
+                has_system = any(m.get("role") == "system" for m in self.context.messages)
+                if not has_system:
+                    logger.warning("System prompt was missing from context — re-injecting")
+                    self.context.messages.insert(0, {"role": "system", "content": self.current_system_prompt})
 
             # Trim context to system prompt + last 20 messages to avoid 429 rate limits
             if self.context:
@@ -577,7 +595,7 @@ class TranscriptInterceptor(FrameProcessor):
             if should_switch and detected and detected != self.current_language:
                 logger.info(f"Switching language from {self.current_language} to {detected}")
                 self.current_language = detected
-                
+
                 system_prompt = build_prompt(
                     agent_name=self.agent_name,
                     org_name=self.org_name,
@@ -585,6 +603,7 @@ class TranscriptInterceptor(FrameProcessor):
                     org_description=self.org_description,
                     instructions=self.instructions
                 )
+                self.current_system_prompt = system_prompt
                 if self.context:
                     updated = False
                     for msg in self.context.messages:
@@ -704,12 +723,15 @@ async def startup_event():
     await init_db()
     await _resolve_cartesia_voice()
     global db_pool
+    # Redact password for logging
+    safe_url = re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", DATABASE_URL or "")
+    logger.info("Attempting DB pool connection to: %s", safe_url[:120])
     try:
-        db_pool = await asyncpg.create_pool(DATABASE_URL, statement_cache_size=0)
+        db_pool = await asyncpg.create_pool(DATABASE_URL, statement_cache_size=0, min_size=1, max_size=5)
         logger.info("PostgreSQL database pool initialized successfully")
     except Exception as e:
-        logger.error("Could not initialize PostgreSQL database pool: %s", e)
-        logger.warning("Running in DATABASE-LESS mode. Call logs and transcripts will NOT be saved to PostgreSQL.")
+        logger.error("!! DB POOL FAILED !! %s: %s", type(e).__name__, e)
+        logger.warning("Running DATABASE-LESS. Transcripts, calls, and settings WILL NOT persist. Check DATABASE_URL_AIRA env var on Railway and that Supabase project is not paused.")
 
 @api_app.on_event("shutdown")
 async def shutdown_event():
@@ -747,11 +769,19 @@ async def run_pipeline(websocket: WebSocket):
     )
     logger.info("STT provider initialized: Sarvam STT (saarika:v2.5)")
     
-    llm = GroqLLMService(
-        api_key=os.getenv("GROQ_API_KEY_AIRA", "dummy_key"),
-        model="llama-3.1-8b-instant"
-    )
-    logger.info("LLM provider initialized: Groq (llama-3.1-8b-instant)")
+    # Cap responses at ~120 tokens for short, tight replies (per prompt: 2-4 sentences)
+    llm_kwargs = {
+        "api_key": os.getenv("GROQ_API_KEY_AIRA", "dummy_key"),
+        "model": "llama-3.1-8b-instant",
+    }
+    try:
+        from pipecat.services.groq.llm import GroqLLMService as _GLS
+        if hasattr(_GLS, "InputParams"):
+            llm_kwargs["params"] = _GLS.InputParams(max_tokens=120, temperature=0.6)
+    except Exception:
+        pass
+    llm = GroqLLMService(**llm_kwargs)
+    logger.info("LLM provider initialized: Groq (llama-3.1-8b-instant, max_tokens=120)")
     
     default_voice = _resolved_cartesia_voice_id or os.getenv("CARTESIA_VOICE_ID_AIRA", "f039066f-cdb7-45ed-b51d-1034ae2f04a0")
     tts = CartesiaTTSService(
@@ -763,9 +793,14 @@ async def run_pipeline(websocket: WebSocket):
 
     # Configure Context and Aggregators
     context = LLMContext()
+    # Start strategy: fire on VAD (immediate) + transcription (fallback), so bot interrupts instantly
+    start_strategies = []
+    if _VAD_TURN_STRAT_AVAILABLE:
+        start_strategies.append(VADUserTurnStartStrategy())
+    start_strategies.append(TranscriptionUserTurnStartStrategy())
     user_params = LLMUserAggregatorParams(
         user_turn_strategies=UserTurnStrategies(
-            start=[TranscriptionUserTurnStartStrategy()],
+            start=start_strategies,
             stop=[ExternalUserTurnStopStrategy(timeout=0.8)]
         )
     )
@@ -775,12 +810,18 @@ async def run_pipeline(websocket: WebSocket):
     get_session_id = lambda: session_id
     interceptor = TranscriptInterceptor(serializer, get_session_id, llm, None, context=context)
 
-    # Setup VAD if available on the platform
+    # Setup VAD — strict thresholds to reject echo & background noise
     vad = None
     if _VAD_AVAILABLE:
         try:
-            vad = VADProcessor(vad_analyzer=SileroVADAnalyzer())
-            logger.info("Silero VAD initialized successfully")
+            vad_params = VADParams(
+                confidence=0.75,      # higher = stricter speech detection (default 0.5)
+                start_secs=0.2,       # need 200ms of speech to start (rejects blips)
+                stop_secs=0.6,        # 600ms of silence to stop
+                min_volume=0.65,      # reject quiet ambient sound
+            )
+            vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=vad_params))
+            logger.info("Silero VAD initialized (confidence=0.75, min_volume=0.65)")
         except Exception as e:
             logger.warning(f"Could not instantiate Silero VAD: {e}")
             vad = None
@@ -914,15 +955,21 @@ async def run_pipeline(websocket: WebSocket):
             instructions=instructions
         )
         
-        # Set LLM context with system prompt — direct assignment to ensure it's there
-        context.messages = [{"role": "system", "content": system_prompt}]
-        logger.info("System prompt set for session %s (%d chars). First 120: %s", session_id, len(system_prompt), system_prompt[:120])
+        # Set LLM context with system prompt — mutate list in-place to survive property quirks
+        try:
+            context.messages.clear()
+        except Exception:
+            pass
+        context.add_message({"role": "system", "content": system_prompt})
+        logger.info("System prompt set for session %s (%d chars, %d msgs). First 120: %s",
+                    session_id, len(system_prompt), len(context.messages), system_prompt[:120])
         
         # Update interceptor settings
         interceptor.agent_name = agent_name
         interceptor.org_name = org_name
         interceptor.org_description = org_description
         interceptor.instructions = instructions
+        interceptor.current_system_prompt = system_prompt
         interceptor.current_language = default_language
         interceptor.language_locked = False
         interceptor.caller_name_saved = False
@@ -952,11 +999,16 @@ async def run_pipeline(websocket: WebSocket):
                 org_description=ns_desc,
                 instructions="\n".join(parts)
             )
+            interceptor.current_system_prompt = new_prompt
+            updated = False
             for msg in context.messages:
                 if msg.get("role") == "system":
                     msg["content"] = new_prompt
-                    logger.info("Mid-call system prompt refreshed for session: %s", session_id)
+                    updated = True
                     break
+            if not updated:
+                context.messages.insert(0, {"role": "system", "content": new_prompt})
+            logger.info("Mid-call system prompt refreshed for session: %s", session_id)
 
         _session_prompt_updaters[session_id] = _refresh_prompt
 
