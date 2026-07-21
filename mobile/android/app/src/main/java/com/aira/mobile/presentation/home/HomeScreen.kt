@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +62,9 @@ fun HomeScreen(
     var isPhoneAccountRegistered by remember { mutableStateOf(telecomHelper.isPhoneAccountRegistered()) }
     val micVolume by remember { MyConnection.micVolume }
     val botSpeaking by remember { MyConnection.botSpeaking }
+    val agentStatus by remember { MyConnection.agentStatus }
+    val lastLlmTtftMs by remember { MyConnection.lastLlmTtftMs }
+    val lastTotalTurnMs by remember { MyConnection.lastTotalTurnMs }
     
     var showSimulationDialog by remember { mutableStateOf(false) }
     var simulationPrompt by remember {
@@ -215,13 +219,27 @@ fun HomeScreen(
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
+                val statusLabel = when {
+                    !agentEnabled -> "Agent Muted"
+                    agentStatus == MyConnection.AgentStatus.LISTENING -> "Listening..."
+                    agentStatus == MyConnection.AgentStatus.PROCESSING -> "Processing..."
+                    agentStatus == MyConnection.AgentStatus.SPEAKING -> "Speaking..."
+                    else -> "Awaiting Incoming Calls..."
+                }
+                val statusColor = when {
+                    !agentEnabled -> Color.Gray
+                    agentStatus == MyConnection.AgentStatus.LISTENING -> Color(0xFF5A6BFA)
+                    agentStatus == MyConnection.AgentStatus.PROCESSING -> Color(0xFFFFC107)
+                    agentStatus == MyConnection.AgentStatus.SPEAKING -> Color(0xFF4CAF50)
+                    else -> Color.White
+                }
                 Text(
-                    text = if (agentEnabled) "Awaiting Incoming Calls..." else "Agent Muted",
-                    color = Color.White,
+                    text = statusLabel,
+                    color = statusColor,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium
                 )
-                
+
                 if (agentEnabled) {
                     Spacer(modifier = Modifier.height(12.dp))
                     AudioWaveformVisualizer(
@@ -292,6 +310,70 @@ fun HomeScreen(
                                 uncheckedTrackColor = Color(0xFF161622)
                             )
                         )
+                    }
+                }
+
+                // Model info + latency panel
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1B2F)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "AI Stack",
+                            color = Color(0xFF8A9AFA),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("STT", color = Color.Gray, fontSize = 10.sp)
+                                Text("Sarvam saarika:v2.5", color = Color.White, fontSize = 12.sp)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("LLM", color = Color.Gray, fontSize = 10.sp)
+                                Text("Groq llama-3.1-8b", color = Color.White, fontSize = 12.sp)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("TTS", color = Color.Gray, fontSize = 10.sp)
+                                Text("Cartesia Ramya", color = Color.White, fontSize = 12.sp)
+                            }
+                        }
+                        if (lastLlmTtftMs > 0 || lastTotalTurnMs > 0) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            HorizontalDivider(color = Color(0xFF2C2D4A))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text("LLM TTFT", color = Color.Gray, fontSize = 10.sp)
+                                    Text(
+                                        text = if (lastLlmTtftMs > 0) "${lastLlmTtftMs}ms" else "—",
+                                        color = if (lastLlmTtftMs < 800) Color(0xFF4CAF50) else Color(0xFFFFC107),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("Total Turn", color = Color.Gray, fontSize = 10.sp)
+                                    Text(
+                                        text = if (lastTotalTurnMs > 0) "${lastTotalTurnMs}ms" else "—",
+                                        color = if (lastTotalTurnMs < 2000) Color(0xFF4CAF50) else Color(0xFFFFC107),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 

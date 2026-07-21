@@ -34,6 +34,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.frames.frames import (
     Frame,
+    EndFrame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
@@ -81,6 +82,8 @@ if "postgresql+asyncpg://" in DATABASE_URL:
 
 API_BASE_URL = os.getenv("API_BASE_URL_AIRA", "http://localhost:8000")
 db_pool = None
+# Registry of active session prompt-refresh callbacks: session_id → async callable
+_session_prompt_updaters: dict = {}
 
 # Initialize FastAPI app for HTTP endpoints
 api_app = FastAPI(title="AIRA Mobile API")
@@ -127,7 +130,13 @@ async def update_settings(settings: dict):
                     INSERT INTO agent_settings (key, value) VALUES ($1, $2)
                     ON CONFLICT (key) DO UPDATE SET value = $2
                 """, k, str(v))
-            return {"status": "success"}
+            # Fetch complete merged settings to push to active sessions
+            rows = await conn.fetch("SELECT key, value FROM agent_settings")
+            all_settings = {row['key']: row['value'] for row in rows}
+        # Refresh prompts in all active calls
+        for cb in list(_session_prompt_updaters.values()):
+            asyncio.create_task(cb(all_settings))
+        return {"status": "success"}
     except Exception as e:
         logger.error("API failed to update settings: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -508,7 +517,15 @@ class TranscriptInterceptor(FrameProcessor):
             logger.info(f"User transcript: {text}")
             sess_id = self.get_session_id()
             asyncio.create_task(save_transcript(sess_id, "user", text))
-            
+
+            # Trim context to system prompt + last 20 messages to avoid 429 rate limits
+            if self.context:
+                system_msgs = [m for m in self.context.messages if m.get("role") == "system"]
+                other_msgs = [m for m in self.context.messages if m.get("role") != "system"]
+                if len(other_msgs) > 20:
+                    self.context.messages[:] = system_msgs + other_msgs[-20:]
+                    logger.debug(f"Context trimmed to {len(self.context.messages)} messages")
+
             # Start timer for TTFT
             self.llm_start_time = asyncio.get_event_loop().time()
             self.first_token_received = False
@@ -684,6 +701,7 @@ async def run_pipeline(websocket: WebSocket):
         model="llama-3.1-8b-instant"
     )
     
+    # Set CARTESIA_VOICE_ID_AIRA to Ramya's voice ID from console.cartesia.ai (Voice Library → search "Ramya")
     default_voice = os.getenv("CARTESIA_VOICE_ID_AIRA", "f039066f-cdb7-45ed-b51d-1034ae2f04a0")
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY_AIRA", "dummy_key"),
@@ -785,6 +803,16 @@ async def run_pipeline(websocket: WebSocket):
 
     llm.register_function("search_knowledge_base", search_knowledge_base)
 
+    async def hang_up(params: FunctionCallParams):
+        """End the phone call. Call this ONLY when the caller explicitly says goodbye, bye, wants to hang up, or asks to end the call."""
+        await task.queue_frames([
+            TTSSpeakFrame(text="Goodbye! Have a wonderful day!", append_to_context=False),
+            EndFrame()
+        ])
+        await params.result_callback("Call ended.")
+
+    llm.register_function("hang_up", hang_up)
+
     # Register event handlers for single client lifecycle
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, websocket_conn):
@@ -849,7 +877,36 @@ async def run_pipeline(websocket: WebSocket):
         interceptor.caller_name_saved = False
         interceptor.turn_latencies = []
         interceptor.turn_total_latencies = []
-        
+
+        # Register mid-call prompt refresh callback for this session
+        async def _refresh_prompt(new_settings: dict):
+            ns_agent = new_settings.get("agent_name", agent_name)
+            ns_org = new_settings.get("org_name", org_name)
+            ns_desc = new_settings.get("org_description", org_description)
+            parts = []
+            if new_settings.get("business_hours"):
+                parts.append(f"Business hours: {new_settings['business_hours']}")
+            if new_settings.get("human_escalation"):
+                parts.append(f"When caller asks for a human: {new_settings['human_escalation']}")
+            if new_settings.get("topics_to_avoid"):
+                parts.append(f"Do not discuss: {new_settings['topics_to_avoid']}")
+            if new_settings.get("custom_instructions"):
+                parts.append(new_settings["custom_instructions"])
+            new_prompt = build_prompt(
+                agent_name=ns_agent,
+                org_name=ns_org,
+                language=interceptor.current_language,
+                org_description=ns_desc,
+                instructions="\n".join(parts)
+            )
+            for msg in context.messages:
+                if msg.get("role") == "system":
+                    msg["content"] = new_prompt
+                    logger.info("Mid-call system prompt refreshed for session: %s", session_id)
+                    break
+
+        _session_prompt_updaters[session_id] = _refresh_prompt
+
         # Reset context history for the new call session
         context.messages.clear()
         
@@ -864,6 +921,7 @@ async def run_pipeline(websocket: WebSocket):
     async def on_client_disconnected(transport, websocket_conn):
         logger.info("Client disconnected")
         serializer.websocket = None
+        _session_prompt_updaters.pop(session_id, None)
         # End call and summarize
         avg_ttft = 0
         if hasattr(interceptor, "turn_latencies") and interceptor.turn_latencies:

@@ -35,6 +35,11 @@ class MyConnection(private val context: Context) : Connection() {
         private const val TAG = "MyConnection"
         val micVolume = mutableStateOf(0f)
         val botSpeaking = mutableStateOf(false)
+
+        enum class AgentStatus { IDLE, LISTENING, PROCESSING, SPEAKING }
+        val agentStatus = mutableStateOf(AgentStatus.IDLE)
+        val lastLlmTtftMs = mutableStateOf(0)
+        val lastTotalTurnMs = mutableStateOf(0)
     }
 
     private var isRunning = false
@@ -62,6 +67,7 @@ class MyConnection(private val context: Context) : Connection() {
         botSpeakingDebounceJob = debounceScope.launch {
             delay(1200)
             botSpeaking.value = false
+            agentStatus.value = AgentStatus.IDLE
         }
     }
 
@@ -220,9 +226,10 @@ class MyConnection(private val context: Context) : Connection() {
                 // Play synthesized audio packet received from Pipecat
                 val audioData = bytes.toByteArray()
                 audioTrack?.write(audioData, 0, audioData.size)
-                
+
                 // Update bot speaking activity
                 botSpeaking.value = true
+                agentStatus.value = AgentStatus.SPEAKING
                 resetBotSpeakingDebounce()
             }
 
@@ -242,11 +249,17 @@ class MyConnection(private val context: Context) : Connection() {
                                 timestamp = System.currentTimeMillis()
                             )
                         )
+                        // User transcript received = LLM is now processing
+                        if (speaker == "user") {
+                            agentStatus.value = AgentStatus.PROCESSING
+                        }
                     } else if (msgType == "metrics") {
                         val ttft = json.optInt("llm_ttft_ms", 0)
                         val totalTurn = json.optInt("total_turn_ms", 0)
                         if (ttft > 0 || totalTurn > 0) {
                             dbHelper.updateCallMetrics(sessionId, ttft, totalTurn)
+                            lastLlmTtftMs.value = ttft
+                            lastTotalTurnMs.value = totalTurn
                         }
                     } else if (msgType == "interrupted") {
                         Log.i(TAG, "Interruption received, stopping current audio playback")
@@ -359,6 +372,11 @@ class MyConnection(private val context: Context) : Connection() {
                         val rms = Math.sqrt(sum / (readBytes / 2))
                         val normalized = (rms / 32768.0).toFloat().coerceIn(0f, 1f)
                         micVolume.value = normalized
+                        if (normalized > 0.05f && agentStatus.value == AgentStatus.IDLE) {
+                            agentStatus.value = AgentStatus.LISTENING
+                        } else if (normalized <= 0.01f && agentStatus.value == AgentStatus.LISTENING) {
+                            agentStatus.value = AgentStatus.IDLE
+                        }
 
                         val frame = buffer.copyOfRange(0, readBytes)
                         this@MyConnection.webSocket?.send(ByteString.of(*frame))
@@ -586,6 +604,7 @@ class MyConnection(private val context: Context) : Connection() {
         isCallActive = false
         micVolume.value = 0f
         botSpeaking.value = false
+        agentStatus.value = AgentStatus.IDLE
         botSpeakingDebounceJob?.cancel()
         MyConnectionService.stopForeground()
 
