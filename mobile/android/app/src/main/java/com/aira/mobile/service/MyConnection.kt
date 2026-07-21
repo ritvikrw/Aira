@@ -329,12 +329,20 @@ class MyConnection(private val context: Context) : Connection() {
                 bufferSize
             )
 
+            val audioAttrs = if (isSimulation) {
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            } else {
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            }
+
             audioTrack = AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setLegacyStreamType(AudioManager.STREAM_VOICE_CALL)
-                        .build()
-                )
+                .setAudioAttributes(audioAttrs)
                 .setAudioFormat(
                     AudioFormat.Builder()
                         .setEncoding(audioFormat)

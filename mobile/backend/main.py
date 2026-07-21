@@ -31,7 +31,7 @@ load_dotenv()
 # Import Pipecat core
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.frames.frames import (
     Frame,
     EndFrame,
@@ -526,6 +526,17 @@ class TranscriptInterceptor(FrameProcessor):
                     self.context.messages[:] = system_msgs + other_msgs[-20:]
                     logger.debug(f"Context trimmed to {len(self.context.messages)} messages")
 
+            # Log context state before LLM call
+            if self.context:
+                sys_count = sum(1 for m in self.context.messages if m.get("role") == "system")
+                total_count = len(self.context.messages)
+                sys_preview = ""
+                for m in self.context.messages:
+                    if m.get("role") == "system":
+                        sys_preview = str(m.get("content", ""))[:100]
+                        break
+                logger.info(f"Context before LLM: {total_count} msgs ({sys_count} system). System preview: {sys_preview}")
+
             # Start timer for TTFT
             self.llm_start_time = asyncio.get_event_loop().time()
             self.first_token_received = False
@@ -605,7 +616,7 @@ class TranscriptInterceptor(FrameProcessor):
                 self.first_token_received = True
                 self.current_ttft = int((asyncio.get_event_loop().time() - self.llm_start_time) * 1000)
                 self.turn_latencies.append(self.current_ttft)
-                logger.info(f"LLM TTFT (Time to First Token) measured: {self.current_ttft} ms")
+                logger.info(f">>> LATENCY | LLM TTFT: {self.current_ttft}ms <<<")
             
         elif isinstance(frame, LLMFullResponseEndFrame):
             full_text = "".join(self.current_agent_response).strip()
@@ -619,7 +630,7 @@ class TranscriptInterceptor(FrameProcessor):
                 if self.llm_start_time is not None:
                     total_latency = int((asyncio.get_event_loop().time() - self.llm_start_time) * 1000)
                     self.turn_total_latencies.append(total_latency)
-                    logger.info(f"Total turn response generation latency: {total_latency} ms")
+                    logger.info(f">>> LATENCY | Total Turn: {total_latency}ms | TTFT: {self.current_ttft}ms <<<")
 
                 if self.serializer.websocket:
                     try:
@@ -649,9 +660,49 @@ class TranscriptInterceptor(FrameProcessor):
             self.current_ttft = 0
 
 
+_resolved_cartesia_voice_id: str | None = None
+
+async def _resolve_cartesia_voice():
+    """Look up 'Ramya' voice ID from Cartesia API at startup."""
+    global _resolved_cartesia_voice_id
+    env_voice = os.getenv("CARTESIA_VOICE_ID_AIRA", "")
+    if env_voice:
+        _resolved_cartesia_voice_id = env_voice
+        logger.info("Using CARTESIA_VOICE_ID_AIRA from env: %s", env_voice)
+        return
+    api_key = os.getenv("CARTESIA_API_KEY_AIRA", "")
+    if not api_key:
+        logger.warning("No CARTESIA_API_KEY_AIRA set, cannot look up Ramya voice")
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.cartesia.ai/voices?q=Ramya&limit=5",
+                headers={
+                    "X-API-Key": api_key,
+                    "Cartesia-Version": "2024-06-10",
+                }
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                voices = data if isinstance(data, list) else data.get("data", data.get("voices", []))
+                for v in voices:
+                    name = v.get("name", "")
+                    if "ramya" in name.lower():
+                        _resolved_cartesia_voice_id = v["id"]
+                        logger.info("Resolved Cartesia voice '%s' → %s", name, v["id"])
+                        return
+                logger.warning("No 'Ramya' voice found in Cartesia API response. Available: %s",
+                               [v.get("name") for v in voices[:5]])
+            else:
+                logger.warning("Cartesia voice lookup returned %s: %s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.warning("Could not look up Cartesia voice: %s", e)
+
 @api_app.on_event("startup")
 async def startup_event():
     await init_db()
+    await _resolve_cartesia_voice()
     global db_pool
     try:
         db_pool = await asyncpg.create_pool(DATABASE_URL, statement_cache_size=0)
@@ -700,9 +751,9 @@ async def run_pipeline(websocket: WebSocket):
         api_key=os.getenv("GROQ_API_KEY_AIRA", "dummy_key"),
         model="llama-3.1-8b-instant"
     )
+    logger.info("LLM provider initialized: Groq (llama-3.1-8b-instant)")
     
-    # Set CARTESIA_VOICE_ID_AIRA to Ramya's voice ID from console.cartesia.ai (Voice Library → search "Ramya")
-    default_voice = os.getenv("CARTESIA_VOICE_ID_AIRA", "f039066f-cdb7-45ed-b51d-1034ae2f04a0")
+    default_voice = _resolved_cartesia_voice_id or os.getenv("CARTESIA_VOICE_ID_AIRA", "f039066f-cdb7-45ed-b51d-1034ae2f04a0")
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY_AIRA", "dummy_key"),
         voice_id=default_voice,
@@ -751,7 +802,7 @@ async def run_pipeline(websocket: WebSocket):
     
     pipeline = Pipeline(pipeline_elements)
     
-    task = PipelineTask(pipeline)
+    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
     interceptor.task = task
 
     # Implement and Register Knowledge Base Search Tool
@@ -863,9 +914,9 @@ async def run_pipeline(websocket: WebSocket):
             instructions=instructions
         )
         
-        # Update LLM context system message for Groq/OpenAI compatible interface
-        context.messages = [msg for msg in context.messages if msg.get("role") != "system"]
-        context.add_message({"role": "system", "content": system_prompt})
+        # Set LLM context with system prompt — direct assignment to ensure it's there
+        context.messages = [{"role": "system", "content": system_prompt}]
+        logger.info("System prompt set for session %s (%d chars). First 120: %s", session_id, len(system_prompt), system_prompt[:120])
         
         # Update interceptor settings
         interceptor.agent_name = agent_name

@@ -67,11 +67,18 @@ fun CallHistoryScreen(
         }
     }
 
-    // Load call logs from server if online, fallback to SQLite
+    // Load call logs: merge server + local SQLite, dedup by sessionId
     LaunchedEffect(Unit) {
+        scope.launch(Dispatchers.IO) {
+            val localLogs = dbHelper.getAllCallLogs()
+            withContext(Dispatchers.Main) {
+                callLogs = localLogs
+                isLoading = false
+            }
+        }
         agentRepository.fetchCallHistory(httpUrl) { jsonArray ->
-            if (jsonArray != null) {
-                val list = mutableListOf<CallLogEntity>()
+            if (jsonArray != null && jsonArray.length() > 0) {
+                val serverList = mutableListOf<CallLogEntity>()
                 try {
                     val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
                     for (i in 0 until jsonArray.length()) {
@@ -88,8 +95,7 @@ fun CallHistoryScreen(
                         } else {
                             System.currentTimeMillis()
                         }
-                        
-                        list.add(
+                        serverList.add(
                             CallLogEntity(
                                 sessionId = obj.optString("session_id"),
                                 callerNumber = obj.optString("caller_phone"),
@@ -104,21 +110,11 @@ fun CallHistoryScreen(
                             )
                         )
                     }
-                    callLogs = list
-                    isLoading = false
-                } catch (e: Exception) {
-                    // Fallback on parsing error
-                    scope.launch(Dispatchers.IO) {
-                        callLogs = dbHelper.getAllCallLogs()
-                        isLoading = false
-                    }
-                }
-            } else {
-                // Fallback to SQLite if server offline
-                scope.launch(Dispatchers.IO) {
-                    callLogs = dbHelper.getAllCallLogs()
-                    isLoading = false
-                }
+                    // Merge: server wins on duplicates, add local-only entries
+                    val serverIds = serverList.map { it.sessionId }.toSet()
+                    val localOnly = callLogs.filter { it.sessionId !in serverIds }
+                    callLogs = (serverList + localOnly).sortedByDescending { it.startTime }
+                } catch (_: Exception) { }
             }
         }
     }
