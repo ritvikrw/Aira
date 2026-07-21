@@ -27,10 +27,14 @@ import okio.ByteString
 import org.json.JSONObject
 import java.util.UUID
 import kotlin.concurrent.thread
+import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.*
 
 class MyConnection(private val context: Context) : Connection() {
     companion object {
         private const val TAG = "MyConnection"
+        val micVolume = mutableStateOf(0f)
+        val botSpeaking = mutableStateOf(false)
     }
 
     private var isRunning = false
@@ -49,6 +53,17 @@ class MyConnection(private val context: Context) : Connection() {
     
     private var isSimulation = false
     private var customCallerName = "Incoming Call"
+    
+    private var botSpeakingDebounceJob: Job? = null
+    private val debounceScope = CoroutineScope(Dispatchers.Main)
+
+    private fun resetBotSpeakingDebounce() {
+        botSpeakingDebounceJob?.cancel()
+        botSpeakingDebounceJob = debounceScope.launch {
+            delay(1200)
+            botSpeaking.value = false
+        }
+    }
 
     fun setSimulation(sim: Boolean) {
         this.isSimulation = sim
@@ -205,6 +220,10 @@ class MyConnection(private val context: Context) : Connection() {
                 // Play synthesized audio packet received from Pipecat
                 val audioData = bytes.toByteArray()
                 audioTrack?.write(audioData, 0, audioData.size)
+                
+                // Update bot speaking activity
+                botSpeaking.value = true
+                resetBotSpeakingDebounce()
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -329,10 +348,23 @@ class MyConnection(private val context: Context) : Connection() {
                 while (isRunning) {
                     val readBytes = audioRecord?.read(buffer, 0, bufferSize) ?: 0
                     if (readBytes > 0 && isRunning) {
+                        // Calculate RMS volume level
+                        var sum = 0.0
+                        var i = 0
+                        while (i < readBytes - 1) {
+                            val sample = ((buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xFF)).toDouble()
+                            sum += sample * sample
+                            i += 2
+                        }
+                        val rms = Math.sqrt(sum / (readBytes / 2))
+                        val normalized = (rms / 32768.0).toFloat().coerceIn(0f, 1f)
+                        micVolume.value = normalized
+
                         val frame = buffer.copyOfRange(0, readBytes)
                         this@MyConnection.webSocket?.send(ByteString.of(*frame))
                     }
                 }
+                micVolume.value = 0f
                 Log.i(TAG, "Audio Record thread stopped")
             }
         } catch (e: Exception) {
@@ -552,6 +584,9 @@ class MyConnection(private val context: Context) : Connection() {
     private fun cleanup() {
         isRunning = false
         isCallActive = false
+        micVolume.value = 0f
+        botSpeaking.value = false
+        botSpeakingDebounceJob?.cancel()
         MyConnectionService.stopForeground()
 
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager

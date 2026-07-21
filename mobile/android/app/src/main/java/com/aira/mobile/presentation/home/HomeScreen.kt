@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aira.mobile.domain.repository.AgentRepository
 import com.aira.mobile.service.TelecomHelper
+import com.aira.mobile.service.MyConnection
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,6 +59,8 @@ fun HomeScreen(
     
     var isDefaultDialer by remember { mutableStateOf(telecomHelper.isDefaultDialer()) }
     var isPhoneAccountRegistered by remember { mutableStateOf(telecomHelper.isPhoneAccountRegistered()) }
+    val micVolume by remember { MyConnection.micVolume }
+    val botSpeaking by remember { MyConnection.botSpeaking }
     
     var showSimulationDialog by remember { mutableStateOf(false) }
     var simulationPrompt by remember {
@@ -218,6 +221,15 @@ fun HomeScreen(
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium
                 )
+                
+                if (agentEnabled) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    AudioWaveformVisualizer(
+                        volume = micVolume,
+                        isBotSpeaking = botSpeaking,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
             }
 
             // Controls & Metrics Card
@@ -442,7 +454,7 @@ fun HomeScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text(
-                            text = "Set up your custom prompt scenario and simulated caller details below:",
+                            text = "Set up your custom prompt scenario below:",
                             color = Color.LightGray,
                             fontSize = 12.sp
                         )
@@ -462,38 +474,6 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth(),
                             maxLines = 5
                         )
-
-                        OutlinedTextField(
-                            value = simulationCallerName,
-                            onValueChange = { simulationCallerName = it },
-                            label = { Text("Simulated Caller Name") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF5A6BFA),
-                                unfocusedBorderColor = Color.Gray,
-                                focusedLabelColor = Color(0xFF8A9AFA),
-                                unfocusedLabelColor = Color.Gray
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-
-                        OutlinedTextField(
-                            value = simulationNumber,
-                            onValueChange = { simulationNumber = it },
-                            label = { Text("Simulated Phone Number") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF5A6BFA),
-                                unfocusedBorderColor = Color.Gray,
-                                focusedLabelColor = Color(0xFF8A9AFA),
-                                unfocusedLabelColor = Color.Gray
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
                     }
                 },
                 confirmButton = {
@@ -501,8 +481,8 @@ fun HomeScreen(
                         onClick = {
                             sharedPreferences.edit().putString("simulation_prompt", simulationPrompt).apply()
                             telecomHelper.simulateIncomingCall(
-                                callerName = simulationCallerName,
-                                callerNumber = simulationNumber
+                                callerName = "Test Caller (Simulation)",
+                                callerNumber = "12345"
                             )
                             showSimulationDialog = false
                         },
@@ -518,6 +498,50 @@ fun HomeScreen(
                 },
                 containerColor = Color(0xFF1E1F35),
                 shape = RoundedCornerShape(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun AudioWaveformVisualizer(
+    volume: Float,
+    isBotSpeaking: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val barCount = 7
+        val baseHeights = listOf(12.dp, 24.dp, 36.dp, 48.dp, 36.dp, 24.dp, 12.dp)
+        
+        for (i in 0 until barCount) {
+            val baseHeight = baseHeights[i]
+            val targetHeight = if (isBotSpeaking) {
+                val infiniteTransition = rememberInfiniteTransition(label = "bar_$i")
+                val heightAnim by infiniteTransition.animateFloat(
+                    initialValue = 8f,
+                    targetValue = 28f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(400 + i * 100),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "heightAnim"
+                )
+                heightAnim.dp
+            } else {
+                (8.dp + baseHeight * volume * 2.5f).coerceAtMost(56.dp)
+            }
+            
+            val color = if (isBotSpeaking) Color(0xFF4CAF50) else Color(0xFF5A6BFA)
+            
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(targetHeight)
+                    .background(color, RoundedCornerShape(2.dp))
             )
         }
     }
