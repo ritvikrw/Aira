@@ -559,12 +559,28 @@ class MyConnection(private val context: Context) : Connection() {
 
         try {
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 sampleRate,
                 channelConfigIn,
                 audioFormat,
                 bufferSize
             )
+
+            val sessionId = audioRecord?.audioSessionId ?: 0
+            if (sessionId != 0) {
+                if (AcousticEchoCanceler.isAvailable()) {
+                    AcousticEchoCanceler.create(sessionId)?.enabled = true
+                    Log.i(TAG, "Local Echo AcousticEchoCanceler enabled")
+                }
+                if (NoiseSuppressor.isAvailable()) {
+                    NoiseSuppressor.create(sessionId)?.enabled = true
+                    Log.i(TAG, "Local Echo NoiseSuppressor enabled")
+                }
+                if (AutomaticGainControl.isAvailable()) {
+                    AutomaticGainControl.create(sessionId)?.enabled = true
+                    Log.i(TAG, "Local Echo AutomaticGainControl enabled")
+                }
+            }
 
             audioTrack = AudioTrack.Builder()
                 .setAudioAttributes(

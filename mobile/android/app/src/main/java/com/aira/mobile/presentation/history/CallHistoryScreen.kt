@@ -152,8 +152,15 @@ fun CallHistoryScreen(
                                         )
                                     )
                                 }
-                                transcriptsForSelectedLog = list
-                                showTranscriptDialog = true
+                                if (list.isEmpty()) {
+                                    scope.launch(Dispatchers.IO) {
+                                        transcriptsForSelectedLog = dbHelper.getTranscriptsForSession(log.sessionId)
+                                        showTranscriptDialog = true
+                                    }
+                                } else {
+                                    transcriptsForSelectedLog = list
+                                    showTranscriptDialog = true
+                                }
                             } catch (e: Exception) {
                                 scope.launch(Dispatchers.IO) {
                                     transcriptsForSelectedLog = dbHelper.getTranscriptsForSession(log.sessionId)

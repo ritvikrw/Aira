@@ -604,15 +604,7 @@ class TranscriptInterceptor(FrameProcessor):
                     instructions=self.instructions
                 )
                 self.current_system_prompt = system_prompt
-                if self.context:
-                    updated = False
-                    for msg in self.context.messages:
-                        if msg.get("role") == "system":
-                            msg["content"] = system_prompt
-                            updated = True
-                            break
-                    if not updated:
-                        self.context.messages.insert(0, {"role": "system", "content": system_prompt})
+                self.llm._settings.system_instruction = system_prompt
                 
                 # Push a confirmation message bypass LLM
                 confirmations = {
@@ -643,6 +635,17 @@ class TranscriptInterceptor(FrameProcessor):
                 logger.info(f"Agent transcript: {full_text}")
                 sess_id = self.get_session_id()
                 asyncio.create_task(save_transcript(sess_id, "agent", full_text))
+                
+                # Broadcast agent transcript to the mobile client
+                if self.serializer.websocket:
+                    try:
+                        await self.serializer.websocket.send_text(json.dumps({
+                            "type": "transcript",
+                            "speaker": "agent",
+                            "text": full_text
+                        }))
+                    except Exception as e:
+                        logger.error(f"Error sending agent transcript: {e}")
 
                 # Calculate total turn response generation latency
                 total_latency = 0
@@ -815,13 +818,13 @@ async def run_pipeline(websocket: WebSocket):
     if _VAD_AVAILABLE:
         try:
             vad_params = VADParams(
-                confidence=0.75,      # higher = stricter speech detection (default 0.5)
-                start_secs=0.2,       # need 200ms of speech to start (rejects blips)
-                stop_secs=0.6,        # 600ms of silence to stop
-                min_volume=0.65,      # reject quiet ambient sound
+                confidence=0.85,      # higher = stricter speech detection
+                start_secs=0.35,      # need 350ms of speech to start (rejects background noise)
+                stop_secs=0.5,        # 500ms of silence to stop
+                min_volume=0.8,       # reject quiet ambient/distant sounds
             )
             vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=vad_params))
-            logger.info("Silero VAD initialized (confidence=0.75, min_volume=0.65)")
+            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.35, stop_secs=0.5, min_volume=0.8)")
         except Exception as e:
             logger.warning(f"Could not instantiate Silero VAD: {e}")
             vad = None
@@ -961,6 +964,9 @@ async def run_pipeline(websocket: WebSocket):
         except Exception:
             pass
         context.add_message({"role": "system", "content": system_prompt})
+        
+        # Update LLM system instructions
+        llm._settings.system_instruction = system_prompt
         logger.info("System prompt set for session %s (%d chars, %d msgs). First 120: %s",
                     session_id, len(system_prompt), len(context.messages), system_prompt[:120])
         
