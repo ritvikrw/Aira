@@ -122,6 +122,12 @@ class MyConnectionService : ConnectionService() {
         val connection = MyConnection(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             connection.setAddress(request?.address, TelecomManager.PRESENTATION_ALLOWED)
+            val extras = request?.extras
+            val incomingCallExtras = extras?.getBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS)
+            val isSimulation = incomingCallExtras?.getBoolean("is_simulation", false) ?: false
+            val callerName = incomingCallExtras?.getString("caller_name") ?: "Incoming Call"
+            connection.setSimulation(isSimulation)
+            connection.setCallerName(callerName)
         }
         connection.initializingCall()
         return connection
@@ -135,6 +141,12 @@ class MyConnectionService : ConnectionService() {
         val connection = MyConnection(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             connection.setAddress(request?.address, TelecomManager.PRESENTATION_ALLOWED)
+            val extras = request?.extras
+            val incomingCallExtras = extras?.getBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS)
+            val isSimulation = incomingCallExtras?.getBoolean("is_simulation", false) ?: false
+            val callerName = incomingCallExtras?.getString("caller_name") ?: "Outgoing Call"
+            connection.setSimulation(isSimulation)
+            connection.setCallerName(callerName)
         }
         connection.initializingCall()
         return connection

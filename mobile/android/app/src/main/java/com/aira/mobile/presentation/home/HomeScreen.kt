@@ -59,6 +59,13 @@ fun HomeScreen(
     var isDefaultDialer by remember { mutableStateOf(telecomHelper.isDefaultDialer()) }
     var isPhoneAccountRegistered by remember { mutableStateOf(telecomHelper.isPhoneAccountRegistered()) }
     
+    var showSimulationDialog by remember { mutableStateOf(false) }
+    var simulationPrompt by remember {
+        mutableStateOf(sharedPreferences.getString("simulation_prompt", "Pretend you are a professional tech support assistant for AIRA. Speak in English or Hindi.") ?: "Pretend you are a professional tech support assistant for AIRA. Speak in English or Hindi.")
+    }
+    var simulationCallerName by remember { mutableStateOf("Test Caller (Simulation)") }
+    var simulationNumber by remember { mutableStateOf("12345") }
+    
     // Refresh states periodically
     LaunchedEffect(Unit) {
         isDefaultDialer = telecomHelper.isDefaultDialer()
@@ -393,10 +400,7 @@ fun HomeScreen(
                 // Debug / Simulation Button
                 Button(
                     onClick = {
-                        telecomHelper.simulateIncomingCall(
-                            callerName = "Test Call (Day 2)",
-                            callerNumber = "12345"
-                        )
+                        showSimulationDialog = true
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF5A6BFA)
@@ -418,6 +422,103 @@ fun HomeScreen(
                     )
                 }
             }
+        }
+
+        // Custom Simulation Scenario Dialog
+        if (showSimulationDialog) {
+            AlertDialog(
+                onDismissRequest = { showSimulationDialog = false },
+                title = {
+                    Text(
+                        text = "Simulate Call Scenario",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Set up your custom prompt scenario and simulated caller details below:",
+                            color = Color.LightGray,
+                            fontSize = 12.sp
+                        )
+                        
+                        OutlinedTextField(
+                            value = simulationPrompt,
+                            onValueChange = { simulationPrompt = it },
+                            label = { Text("Simulation Prompt/Role") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF5A6BFA),
+                                unfocusedBorderColor = Color.Gray,
+                                focusedLabelColor = Color(0xFF8A9AFA),
+                                unfocusedLabelColor = Color.Gray
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            maxLines = 5
+                        )
+
+                        OutlinedTextField(
+                            value = simulationCallerName,
+                            onValueChange = { simulationCallerName = it },
+                            label = { Text("Simulated Caller Name") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF5A6BFA),
+                                unfocusedBorderColor = Color.Gray,
+                                focusedLabelColor = Color(0xFF8A9AFA),
+                                unfocusedLabelColor = Color.Gray
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = simulationNumber,
+                            onValueChange = { simulationNumber = it },
+                            label = { Text("Simulated Phone Number") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF5A6BFA),
+                                unfocusedBorderColor = Color.Gray,
+                                focusedLabelColor = Color(0xFF8A9AFA),
+                                unfocusedLabelColor = Color.Gray
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            sharedPreferences.edit().putString("simulation_prompt", simulationPrompt).apply()
+                            telecomHelper.simulateIncomingCall(
+                                callerName = simulationCallerName,
+                                callerNumber = simulationNumber
+                            )
+                            showSimulationDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5A6BFA))
+                    ) {
+                        Text("Start Call", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showSimulationDialog = false }) {
+                        Text("Cancel", color = Color.Gray)
+                    }
+                },
+                containerColor = Color(0xFF1E1F35),
+                shape = RoundedCornerShape(20.dp)
+            )
         }
     }
 }

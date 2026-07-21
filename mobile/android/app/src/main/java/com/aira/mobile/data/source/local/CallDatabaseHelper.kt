@@ -13,7 +13,10 @@ data class CallLogEntity(
     val status: String,
     val startTime: Long,
     val endTime: Long = 0,
-    val durationSeconds: Int = 0
+    val durationSeconds: Int = 0,
+    val isSimulation: Boolean = false,
+    val ttftMs: Int = 0,
+    val totalLatencyMs: Int = 0
 )
 
 data class TranscriptEntity(
@@ -27,7 +30,7 @@ data class TranscriptEntity(
 class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
     companion object {
         private const val DATABASE_NAME = "aira_calls.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 3
         private const val TAG = "CallDatabaseHelper"
 
         // Table Names
@@ -42,6 +45,9 @@ class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         private const val COL_CALL_START_TIME = "start_time"
         private const val COL_CALL_END_TIME = "end_time"
         private const val COL_CALL_DURATION = "duration_seconds"
+        private const val COL_CALL_IS_SIMULATION = "is_simulation"
+        private const val COL_CALL_TTFT_MS = "ttft_ms"
+        private const val COL_CALL_TOTAL_LATENCY_MS = "total_latency_ms"
 
         // Transcripts Columns
         private const val COL_TRANS_ID = "id"
@@ -60,7 +66,10 @@ class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
                 $COL_CALL_STATUS TEXT,
                 $COL_CALL_START_TIME INTEGER,
                 $COL_CALL_END_TIME INTEGER,
-                $COL_CALL_DURATION INTEGER
+                $COL_CALL_DURATION INTEGER,
+                $COL_CALL_IS_SIMULATION INTEGER DEFAULT 0,
+                $COL_CALL_TTFT_MS INTEGER DEFAULT 0,
+                $COL_CALL_TOTAL_LATENCY_MS INTEGER DEFAULT 0
             )
         """.trimIndent()
 
@@ -102,6 +111,9 @@ class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put(COL_CALL_START_TIME, callLog.startTime)
             put(COL_CALL_END_TIME, callLog.endTime)
             put(COL_CALL_DURATION, callLog.durationSeconds)
+            put(COL_CALL_IS_SIMULATION, if (callLog.isSimulation) 1 else 0)
+            put(COL_CALL_TTFT_MS, callLog.ttftMs)
+            put(COL_CALL_TOTAL_LATENCY_MS, callLog.totalLatencyMs)
         }
         db.insertWithOnConflict(TABLE_CALL_LOGS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
@@ -114,6 +126,25 @@ class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put(COL_CALL_STATUS, status)
         }
         db.update(TABLE_CALL_LOGS, values, "$COL_CALL_SESSION_ID = ?", arrayOf(sessionId))
+    }
+
+    fun updateCallTtft(sessionId: String, ttftMs: Int) {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_CALL_TTFT_MS, ttftMs)
+        }
+        db.update(TABLE_CALL_LOGS, values, "$COL_CALL_SESSION_ID = ?", arrayOf(sessionId))
+        Log.i(TAG, "Updated call TTFT for session: $sessionId to $ttftMs ms")
+    }
+
+    fun updateCallMetrics(sessionId: String, ttftMs: Int, totalLatencyMs: Int) {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            if (ttftMs > 0) put(COL_CALL_TTFT_MS, ttftMs)
+            if (totalLatencyMs > 0) put(COL_CALL_TOTAL_LATENCY_MS, totalLatencyMs)
+        }
+        db.update(TABLE_CALL_LOGS, values, "$COL_CALL_SESSION_ID = ?", arrayOf(sessionId))
+        Log.i(TAG, "Updated call metrics for session: $sessionId to TTFT=$ttftMs ms, Total=$totalLatencyMs ms")
     }
 
     // Insert transcript
@@ -143,7 +174,10 @@ class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
                 val startTime = cursor.getLong(cursor.getColumnIndexOrThrow(COL_CALL_START_TIME))
                 val endTime = cursor.getLong(cursor.getColumnIndexOrThrow(COL_CALL_END_TIME))
                 val duration = cursor.getInt(cursor.getColumnIndexOrThrow(COL_CALL_DURATION))
-                list.add(CallLogEntity(sessionId, number, name, status, startTime, endTime, duration))
+                val isSim = cursor.getInt(cursor.getColumnIndexOrThrow(COL_CALL_IS_SIMULATION)) == 1
+                val ttft = cursor.getInt(cursor.getColumnIndexOrThrow(COL_CALL_TTFT_MS))
+                val totalLat = cursor.getInt(cursor.getColumnIndexOrThrow(COL_CALL_TOTAL_LATENCY_MS))
+                list.add(CallLogEntity(sessionId, number, name, status, startTime, endTime, duration, isSim, ttft, totalLat))
             } while (cursor.moveToNext())
         }
         cursor.close()

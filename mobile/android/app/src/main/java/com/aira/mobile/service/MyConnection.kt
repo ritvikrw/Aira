@@ -46,6 +46,17 @@ class MyConnection(private val context: Context) : Connection() {
     private var callStartTime = 0L
     private var originalAudioMode = AudioManager.MODE_NORMAL
     private var originalSpeakerphoneState = false
+    
+    private var isSimulation = false
+    private var customCallerName = "Incoming Call"
+
+    fun setSimulation(sim: Boolean) {
+        this.isSimulation = sim
+    }
+
+    fun setCallerName(name: String) {
+        this.customCallerName = name
+    }
 
     fun initializingCall() {
         val sharedPreferences = context.getSharedPreferences("aira_prefs", Context.MODE_PRIVATE)
@@ -72,9 +83,10 @@ class MyConnection(private val context: Context) : Connection() {
             CallLogEntity(
                 sessionId = sessionId,
                 callerNumber = callerNum,
-                callerName = "Incoming Call",
+                callerName = customCallerName,
                 status = "ringing",
-                startTime = callStartTime
+                startTime = callStartTime,
+                isSimulation = isSimulation
             )
         )
         
@@ -103,9 +115,10 @@ class MyConnection(private val context: Context) : Connection() {
             CallLogEntity(
                 sessionId = sessionId,
                 callerNumber = address?.schemeSpecificPart ?: "Unknown",
-                callerName = "Incoming Call",
+                callerName = customCallerName,
                 status = "active",
-                startTime = callStartTime
+                startTime = callStartTime,
+                isSimulation = isSimulation
             )
         )
         
@@ -159,11 +172,21 @@ class MyConnection(private val context: Context) : Connection() {
             return
         }
 
+        val isSim = isSimulation || callerNum == "12345"
+        val simulationPrompt = sharedPreferences.getString("simulation_prompt", "") ?: ""
         val cleanNumber = callerNum.replace(Regex("[^0-9+]"), "")
-        val wsUrl = if (serverUrl.contains("?")) {
+        var wsUrl = if (serverUrl.contains("?")) {
             "$serverUrl&session_id=$sessionId&caller_phone=$cleanNumber"
         } else {
             "$serverUrl?session_id=$sessionId&caller_phone=$cleanNumber"
+        }
+
+        if (isSim) {
+            wsUrl += "&is_simulation=true"
+            if (simulationPrompt.isNotEmpty()) {
+                val encodedPrompt = java.net.URLEncoder.encode(simulationPrompt, "UTF-8")
+                wsUrl += "&simulation_prompt=$encodedPrompt"
+            }
         }
         Log.i(TAG, "Connecting to Pipecat WebSocket: $wsUrl")
 
@@ -200,6 +223,12 @@ class MyConnection(private val context: Context) : Connection() {
                                 timestamp = System.currentTimeMillis()
                             )
                         )
+                    } else if (msgType == "metrics") {
+                        val ttft = json.optInt("llm_ttft_ms", 0)
+                        val totalTurn = json.optInt("total_turn_ms", 0)
+                        if (ttft > 0 || totalTurn > 0) {
+                            dbHelper.updateCallMetrics(sessionId, ttft, totalTurn)
+                        }
                     } else if (msgType == "interrupted") {
                         Log.i(TAG, "Interruption received, stopping current audio playback")
                         stopAudioPlayback()

@@ -46,6 +46,7 @@ fun CallHistoryScreen(
     var transcriptsForSelectedLog by remember { mutableStateOf<List<TranscriptEntity>>(emptyList()) }
     var showTranscriptDialog by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
+    var selectedTabState by remember { mutableStateOf(0) }
 
     val context = LocalContext.current
     val sharedPreferences = remember { context.getSharedPreferences("aira_prefs", Context.MODE_PRIVATE) }
@@ -95,7 +96,10 @@ fun CallHistoryScreen(
                                 status = obj.optString("status"),
                                 startTime = startTime,
                                 endTime = endTime,
-                                durationSeconds = obj.optInt("call_duration_seconds")
+                                durationSeconds = obj.optInt("call_duration_seconds"),
+                                isSimulation = obj.optBoolean("is_simulation", false),
+                                ttftMs = obj.optInt("llm_ttft_ms", 0),
+                                totalLatencyMs = obj.optInt("total_latency_ms", 0)
                             )
                         )
                     }
@@ -225,6 +229,34 @@ fun CallHistoryScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // Tab selection for separating simulated and standard calls
+            TabRow(
+                selectedTabIndex = selectedTabState,
+                containerColor = Color(0xFF1E1F35),
+                contentColor = Color.White,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+                    .clip(RoundedCornerShape(10.dp))
+            ) {
+                Tab(
+                    selected = selectedTabState == 0,
+                    onClick = { selectedTabState = 0 },
+                    text = { Text("Standard Calls", fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                )
+                Tab(
+                    selected = selectedTabState == 1,
+                    onClick = { selectedTabState = 1 },
+                    text = { Text("Simulated Calls", fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                )
+            }
+
+            val filteredCallLogs = remember(callLogs, selectedTabState) {
+                callLogs.filter { log ->
+                    if (selectedTabState == 0) !log.isSimulation else log.isSimulation
+                }
+            }
+
             if (isLoading) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -232,7 +264,7 @@ fun CallHistoryScreen(
                 ) {
                     CircularProgressIndicator(color = Color(0xFF5A6BFA))
                 }
-            } else if (callLogs.isEmpty()) {
+            } else if (filteredCallLogs.isEmpty()) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -254,7 +286,7 @@ fun CallHistoryScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Incoming calls handled by AIRA will appear here",
+                        text = if (selectedTabState == 0) "Incoming calls handled by AIRA will appear here" else "Simulated calls run for testing will appear here",
                         color = Color.DarkGray,
                         fontSize = 12.sp,
                         textAlign = TextAlign.Center,
@@ -268,7 +300,7 @@ fun CallHistoryScreen(
                         .weight(1f),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(callLogs) { log ->
+                    items(filteredCallLogs) { log ->
                         CallLogItem(
                             log = log,
                             onClick = { selectedLogForTranscript = log }
@@ -356,7 +388,7 @@ fun CallLogItem(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = log.callerNumber,
+                    text = if (log.callerName.isNotEmpty() && log.callerName != "Incoming Call") log.callerName else log.callerNumber,
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp
@@ -366,6 +398,30 @@ fun CallLogItem(
                     color = Color.Gray,
                     fontSize = 12.sp
                 )
+                if (log.ttftMs > 0 || log.totalLatencyMs > 0) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (log.ttftMs > 0) {
+                            Text(
+                                text = "TTFT: ${log.ttftMs}ms",
+                                color = Color(0xFF8A9AFA),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (log.totalLatencyMs > 0) {
+                            Text(
+                                text = "Total: ${log.totalLatencyMs}ms",
+                                color = Color(0xFF4CAF50),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
 
             Column(
@@ -409,7 +465,6 @@ fun TranscriptViewerDialog(
                     .fillMaxSize()
                     .padding(20.dp)
             ) {
-                // Dialog Title
                 Text(
                     text = "Transcript: ${log.callerNumber}",
                     color = Color.White,
@@ -421,6 +476,31 @@ fun TranscriptViewerDialog(
                     color = Color.Gray,
                     fontSize = 12.sp
                 )
+                
+                if (log.ttftMs > 0 || log.totalLatencyMs > 0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (log.ttftMs > 0) {
+                            Text(
+                                text = "Avg TTFT: ${log.ttftMs}ms",
+                                color = Color(0xFF8A9AFA),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (log.totalLatencyMs > 0) {
+                            Text(
+                                text = "Avg Turn Gen: ${log.totalLatencyMs}ms",
+                                color = Color(0xFF4CAF50),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
                 
                 HorizontalDivider(
                     color = Color(0xFF2C2D4A),

@@ -94,6 +94,19 @@ api_app.add_middleware(
 # REST API Endpoints for Android Client
 @api_app.get("/settings")
 async def get_settings():
+    if not db_pool:
+        logger.warning("DB offline - returning default settings")
+        return {
+            "selected_voice_id": "cartesia:f039066f-cdb7-45ed-b51d-1034ae2f04a0",
+            "default_language": "en-IN",
+            "agent_name": "AIRA",
+            "org_name": "AIRA Solutions",
+            "org_description": "We provide premium AI voice receptionist systems.",
+            "custom_instructions": "Be polite, helpful, and professional.",
+            "business_hours": "9 AM to 5 PM, Monday to Friday",
+            "human_escalation": "Transfer to our support line at +1-800-555-0199",
+            "topics_to_avoid": "Do not discuss legal advice or product pricing guarantees."
+        }
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch("SELECT key, value FROM agent_settings")
@@ -104,6 +117,9 @@ async def get_settings():
 
 @api_app.post("/settings")
 async def update_settings(settings: dict):
+    if not db_pool:
+        logger.warning("DB offline - cannot save settings")
+        return {"status": "success", "warning": "database offline"}
     try:
         async with db_pool.acquire() as conn:
             for k, v in settings.items():
@@ -118,10 +134,12 @@ async def update_settings(settings: dict):
 
 @api_app.get("/calls")
 async def get_calls():
+    if not db_pool:
+        return []
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT session_id, caller_id, caller_name, status, call_start_time, call_end_time, call_duration_seconds 
+                SELECT session_id, caller_id, caller_name, status, call_start_time, call_end_time, call_duration_seconds, is_simulation, llm_ttft_ms, total_latency_ms 
                 FROM call_logs 
                 ORDER BY call_start_time DESC
             """)
@@ -134,7 +152,10 @@ async def get_calls():
                     "status": r['status'],
                     "call_start_time": r['call_start_time'].isoformat() if r['call_start_time'] else None,
                     "call_end_time": r['call_end_time'].isoformat() if r['call_end_time'] else None,
-                    "call_duration_seconds": r['call_duration_seconds']
+                    "call_duration_seconds": r['call_duration_seconds'],
+                    "is_simulation": r.get('is_simulation', False) if hasattr(r, 'get') else r['is_simulation'],
+                    "llm_ttft_ms": r.get('llm_ttft_ms', 0) if hasattr(r, 'get') else r['llm_ttft_ms'],
+                    "total_latency_ms": r.get('total_latency_ms', 0) if hasattr(r, 'get') else r['total_latency_ms']
                 })
             return calls
     except Exception as e:
@@ -143,6 +164,8 @@ async def get_calls():
 
 @api_app.get("/transcripts/{session_id}")
 async def get_transcripts(session_id: str):
+    if not db_pool:
+        return []
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch("""
@@ -162,8 +185,9 @@ async def get_transcripts(session_id: str):
 
 # Database Initialization
 async def init_db():
-    conn = await asyncpg.connect(DATABASE_URL, statement_cache_size=0)
+    conn = None
     try:
+        conn = await asyncpg.connect(DATABASE_URL, statement_cache_size=0)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS call_logs (
                 session_id      VARCHAR(64) PRIMARY KEY,
@@ -173,9 +197,16 @@ async def init_db():
                 status          VARCHAR(32) DEFAULT 'active',
                 call_start_time TIMESTAMPTZ DEFAULT NOW(),
                 call_end_time   TIMESTAMPTZ,
-                call_duration_seconds INTEGER
+                call_duration_seconds INTEGER,
+                is_simulation   BOOLEAN DEFAULT FALSE,
+                llm_ttft_ms     INTEGER DEFAULT 0,
+                total_latency_ms INTEGER DEFAULT 0
             );
         """)
+        # Migrate existing schemas
+        await conn.execute("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS is_simulation BOOLEAN DEFAULT FALSE;")
+        await conn.execute("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS llm_ttft_ms INTEGER DEFAULT 0;")
+        await conn.execute("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS total_latency_ms INTEGER DEFAULT 0;")
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS transcripts (
                 id          SERIAL PRIMARY KEY,
@@ -224,7 +255,8 @@ async def init_db():
     except Exception as e:
         logger.error("Failed to initialize database: %s", e)
     finally:
-        await conn.close()
+        if conn:
+            await conn.close()
 
 # Database Helper Functions
 async def fetch_settings() -> dict:
@@ -236,19 +268,25 @@ async def fetch_settings() -> dict:
         logger.error("Could not fetch settings from DB: %s", e)
         return {}
 
-async def register_call(session_id: str, caller_phone: str) -> None:
+async def register_call(session_id: str, caller_phone: str, is_simulation: bool = False) -> None:
+    if not db_pool:
+        logger.warning("DB offline - cannot register call: %s (phone=%s, simulation=%s)", session_id, caller_phone, is_simulation)
+        return
     try:
         async with db_pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO call_logs (session_id, caller_id, room_name, status, call_start_time)
-                VALUES ($1, $2, $3, $4, NOW())
-                ON CONFLICT (session_id) DO UPDATE SET caller_id = $2
-            """, session_id, caller_phone, "mobile_call", "active")
-            logger.info("Call registered in DB: %s (phone=%s)", session_id, caller_phone)
+                INSERT INTO call_logs (session_id, caller_id, room_name, status, call_start_time, is_simulation)
+                VALUES ($1, $2, $3, $4, NOW(), $5)
+                ON CONFLICT (session_id) DO UPDATE SET caller_id = $2, is_simulation = $5
+            """, session_id, caller_phone, "mobile_call", "active", is_simulation)
+            logger.info("Call registered in DB: %s (phone=%s, is_simulation=%s)", session_id, caller_phone, is_simulation)
     except Exception as e:
         logger.error("Failed to register call in DB %s: %s", session_id, e)
 
 async def persist_caller_name(session_id: str, name: str) -> None:
+    if not db_pool:
+        logger.warning("DB offline - cannot persist caller name: %s for session: %s", name, session_id)
+        return
     try:
         async with db_pool.acquire() as conn:
             await conn.execute("""
@@ -259,6 +297,9 @@ async def persist_caller_name(session_id: str, name: str) -> None:
         logger.warning("Failed to save caller name in DB: %s", e)
 
 async def save_transcript(session_id: str, speaker: str, message: str) -> None:
+    if not db_pool:
+        logger.warning("DB offline - cannot save transcript for session: %s (speaker=%s)", session_id, speaker)
+        return
     try:
         async with db_pool.acquire() as conn:
             await conn.execute("""
@@ -268,7 +309,10 @@ async def save_transcript(session_id: str, speaker: str, message: str) -> None:
     except Exception as e:
         logger.warning("Failed to save transcript in DB: %s", e)
 
-async def end_call(session_id: str) -> None:
+async def end_call(session_id: str, avg_ttft: int = 0, avg_total_latency: int = 0) -> None:
+    if not db_pool:
+        logger.warning("DB offline - cannot end call: %s (avg_ttft=%s, avg_total_latency=%s)", session_id, avg_ttft, avg_total_latency)
+        return
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow("SELECT call_start_time FROM call_logs WHERE session_id = $1", session_id)
@@ -277,10 +321,10 @@ async def end_call(session_id: str) -> None:
                 start_time = row['call_start_time']
                 duration = int((datetime.now(start_time.tzinfo) - start_time).total_seconds())
             await conn.execute("""
-                UPDATE call_logs SET status = $1, call_end_time = NOW(), call_duration_seconds = $2
-                WHERE session_id = $3
-            """, "completed", duration, session_id)
-            logger.info("Call ended in DB: %s", session_id)
+                UPDATE call_logs SET status = $1, call_end_time = NOW(), call_duration_seconds = $2, llm_ttft_ms = $3, total_latency_ms = $4
+                WHERE session_id = $5
+            """, "completed", duration, avg_ttft, avg_total_latency, session_id)
+            logger.info("Call ended in DB: %s (duration=%s, avg_ttft=%s, avg_total=%s)", session_id, duration, avg_ttft, avg_total_latency)
             asyncio.create_task(summarize_call_in_db(session_id))
     except Exception as e:
         logger.error("Failed to end call in DB %s: %s", session_id, e)
@@ -448,6 +492,11 @@ class TranscriptInterceptor(FrameProcessor):
         self.caller_name_saved = False
         self.language_locked = False
         self.current_language = "en-IN"
+        self.turn_latencies = []
+        self.turn_total_latencies = []
+        self.llm_start_time = None
+        self.first_token_received = True
+        self.current_ttft = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -458,6 +507,10 @@ class TranscriptInterceptor(FrameProcessor):
             logger.info(f"User transcript: {text}")
             sess_id = self.get_session_id()
             asyncio.create_task(save_transcript(sess_id, "user", text))
+            
+            # Start timer for TTFT
+            self.llm_start_time = asyncio.get_event_loop().time()
+            self.first_token_received = False
             
             if self.serializer.websocket:
                 try:
@@ -523,12 +576,26 @@ class TranscriptInterceptor(FrameProcessor):
         elif isinstance(frame, TextFrame):
             self.current_agent_response.append(frame.text)
             
+            # Measure TTFT when the first token/text is received from LLM for this turn
+            if not self.first_token_received and self.llm_start_time is not None:
+                self.first_token_received = True
+                self.current_ttft = int((asyncio.get_event_loop().time() - self.llm_start_time) * 1000)
+                self.turn_latencies.append(self.current_ttft)
+                logger.info(f"LLM TTFT (Time to First Token) measured: {self.current_ttft} ms")
+            
         elif isinstance(frame, LLMFullResponseEndFrame):
             full_text = "".join(self.current_agent_response).strip()
             if full_text:
                 logger.info(f"Agent transcript: {full_text}")
                 sess_id = self.get_session_id()
                 asyncio.create_task(save_transcript(sess_id, "agent", full_text))
+
+                # Calculate total turn response generation latency
+                total_latency = 0
+                if self.llm_start_time is not None:
+                    total_latency = int((asyncio.get_event_loop().time() - self.llm_start_time) * 1000)
+                    self.turn_total_latencies.append(total_latency)
+                    logger.info(f"Total turn response generation latency: {total_latency} ms")
 
                 if self.serializer.websocket:
                     try:
@@ -537,8 +604,14 @@ class TranscriptInterceptor(FrameProcessor):
                             "speaker": "agent",
                             "text": full_text
                         }))
+                        # Broadcast latency metrics
+                        await self.serializer.websocket.send_text(json.dumps({
+                            "type": "metrics",
+                            "llm_ttft_ms": self.current_ttft,
+                            "total_turn_ms": total_latency
+                        }))
                     except Exception as e:
-                        logger.error(f"Error sending agent transcript: {e}")
+                        logger.error(f"Error sending agent transcript/metrics: {e}")
 
                 # Check for agent echoing/saving name
                 if not self.caller_name_saved:
@@ -549,14 +622,19 @@ class TranscriptInterceptor(FrameProcessor):
                         asyncio.create_task(persist_caller_name(sess_id, name))
 
             self.current_agent_response = []
+            self.current_ttft = 0
 
 
 @api_app.on_event("startup")
 async def startup_event():
     await init_db()
     global db_pool
-    db_pool = await asyncpg.create_pool(DATABASE_URL, statement_cache_size=0)
-    logger.info("PostgreSQL database pool initialized successfully")
+    try:
+        db_pool = await asyncpg.create_pool(DATABASE_URL, statement_cache_size=0)
+        logger.info("PostgreSQL database pool initialized successfully")
+    except Exception as e:
+        logger.error("Could not initialize PostgreSQL database pool: %s", e)
+        logger.warning("Running in DATABASE-LESS mode. Call logs and transcripts will NOT be saved to PostgreSQL.")
 
 @api_app.on_event("shutdown")
 async def shutdown_event():
@@ -712,8 +790,11 @@ async def run_pipeline(websocket: WebSocket):
         session_id = websocket_conn.query_params.get("session_id") or str(uuid.uuid4())
         caller_phone = websocket_conn.query_params.get("caller_phone") or "+00 00000 00000"
         
+        is_simulation = websocket_conn.query_params.get("is_simulation", "false").lower() == "true"
+        simulation_prompt = websocket_conn.query_params.get("simulation_prompt", "")
+        
         # Register call in database
-        asyncio.create_task(register_call(session_id, caller_phone))
+        asyncio.create_task(register_call(session_id, caller_phone, is_simulation))
         
         # Fetch settings from API
         settings = await fetch_settings()
@@ -732,6 +813,11 @@ async def run_pipeline(websocket: WebSocket):
             instruction_parts.append(f"Do not discuss: {settings['topics_to_avoid']}")
         if settings.get("custom_instructions"):
             instruction_parts.append(settings["custom_instructions"])
+            
+        if is_simulation and simulation_prompt:
+            logger.info("Simulation call detected. Appending simulation custom instructions: %s", simulation_prompt)
+            instruction_parts.append(f"\n[CRITICAL SIMULATION SCENARIO / CUSTOM ROLEPLAY INSTRUCTION]:\n{simulation_prompt}")
+            
         instructions = "\n".join(instruction_parts)
         
         # Build system prompt using prompts loader
@@ -755,6 +841,8 @@ async def run_pipeline(websocket: WebSocket):
         interceptor.current_language = default_language
         interceptor.language_locked = False
         interceptor.caller_name_saved = False
+        interceptor.turn_latencies = []
+        interceptor.turn_total_latencies = []
         
         # Reset context history for the new call session
         context.messages.clear()
@@ -771,7 +859,13 @@ async def run_pipeline(websocket: WebSocket):
         logger.info("Client disconnected")
         serializer.websocket = None
         # End call and summarize
-        asyncio.create_task(end_call(session_id))
+        avg_ttft = 0
+        if hasattr(interceptor, "turn_latencies") and interceptor.turn_latencies:
+            avg_ttft = int(sum(interceptor.turn_latencies) / len(interceptor.turn_latencies))
+        avg_total_latency = 0
+        if hasattr(interceptor, "turn_total_latencies") and interceptor.turn_total_latencies:
+            avg_total_latency = int(sum(interceptor.turn_total_latencies) / len(interceptor.turn_total_latencies))
+        asyncio.create_task(end_call(session_id, avg_ttft, avg_total_latency))
 
     runner = PipelineRunner()
     await runner.add_workers(task)

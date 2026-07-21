@@ -69,6 +69,7 @@ class TelecomHelper(private val context: Context) {
                 val incomingCallExtras = Bundle().apply {
                     putString(TelecomManager.EXTRA_CALL_BACK_NUMBER, callerNumber)
                     putString("caller_name", callerName)
+                    putBoolean("is_simulation", true)
                 }
                 putBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS, incomingCallExtras)
             }
