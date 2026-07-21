@@ -57,7 +57,7 @@ except Exception as e:
     _VAD_AVAILABLE = False
 
 # Import Pipecat services
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.llm_service import FunctionCallParams
@@ -478,12 +478,13 @@ class RawFrameSerializer(FrameSerializer):
 
 
 class TranscriptInterceptor(FrameProcessor):
-    def __init__(self, serializer, get_session_id, llm, task, **kwargs):
+    def __init__(self, serializer, get_session_id, llm, task, context=None, **kwargs):
         super().__init__(**kwargs)
         self.serializer = serializer
         self.get_session_id = get_session_id
         self.llm = llm
         self.task = task
+        self.context = context
         self.agent_name = "AIRA"
         self.org_name = ""
         self.org_description = ""
@@ -549,7 +550,6 @@ class TranscriptInterceptor(FrameProcessor):
                 logger.info(f"Switching language from {self.current_language} to {detected}")
                 self.current_language = detected
                 
-                # Rebuild and update LLM system instruction
                 system_prompt = build_prompt(
                     agent_name=self.agent_name,
                     org_name=self.org_name,
@@ -557,8 +557,15 @@ class TranscriptInterceptor(FrameProcessor):
                     org_description=self.org_description,
                     instructions=self.instructions
                 )
-                self.llm._base_system_instruction = system_prompt
-                self.llm._compose_system_instruction()
+                if self.context:
+                    updated = False
+                    for msg in self.context.messages:
+                        if msg.get("role") == "system":
+                            msg["content"] = system_prompt
+                            updated = True
+                            break
+                    if not updated:
+                        self.context.messages.insert(0, {"role": "system", "content": system_prompt})
                 
                 # Push a confirmation message bypass LLM
                 confirmations = {
@@ -672,10 +679,9 @@ async def run_pipeline(websocket: WebSocket):
     )
     logger.info("STT provider initialized: Sarvam STT (saarika:v2.5)")
     
-    llm = GoogleLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY_AIRA", "dummy_key"),
-        model="gemini-2.0-flash",
-        system_instruction="You are AIRA, a prompt-based phone voice receptionist agent."
+    llm = GroqLLMService(
+        api_key=os.getenv("GROQ_API_KEY_AIRA", "dummy_key"),
+        model="llama-3.1-8b-instant"
     )
     
     default_voice = os.getenv("CARTESIA_VOICE_ID_AIRA", "f039066f-cdb7-45ed-b51d-1034ae2f04a0")
@@ -698,7 +704,7 @@ async def run_pipeline(websocket: WebSocket):
 
     # Setup interceptor with None task initially (will assign task after creation)
     get_session_id = lambda: session_id
-    interceptor = TranscriptInterceptor(serializer, get_session_id, llm, None)
+    interceptor = TranscriptInterceptor(serializer, get_session_id, llm, None, context=context)
 
     # Setup VAD if available on the platform
     vad = None
@@ -829,9 +835,9 @@ async def run_pipeline(websocket: WebSocket):
             instructions=instructions
         )
         
-        # Update LLM system instructions
-        llm._base_system_instruction = system_prompt
-        llm._compose_system_instruction()
+        # Update LLM context system message for Groq/OpenAI compatible interface
+        context.messages = [msg for msg in context.messages if msg.get("role") != "system"]
+        context.add_message({"role": "system", "content": system_prompt})
         
         # Update interceptor settings
         interceptor.agent_name = agent_name
