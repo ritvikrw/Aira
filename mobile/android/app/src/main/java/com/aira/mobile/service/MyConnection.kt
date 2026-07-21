@@ -40,6 +40,8 @@ class MyConnection(private val context: Context) : Connection() {
         val agentStatus = mutableStateOf(AgentStatus.IDLE)
         val lastLlmTtftMs = mutableStateOf(0)
         val lastTotalTurnMs = mutableStateOf(0)
+        val isCallActive = mutableStateOf(false)
+        var activeConnection: MyConnection? = null
     }
 
     private var isRunning = false
@@ -95,8 +97,10 @@ class MyConnection(private val context: Context) : Connection() {
         setActive()
         
         isCallActive = true
+        Companion.isCallActive.value = true
+        activeConnection = this
         MyConnectionService.startForeground("Active call with " + (address?.schemeSpecificPart ?: "Unknown"))
-        
+
         // Log call initialization in DB
         callStartTime = System.currentTimeMillis()
         val callerNum = address?.schemeSpecificPart ?: "Unknown"
@@ -129,8 +133,10 @@ class MyConnection(private val context: Context) : Connection() {
         setActive()
         
         isCallActive = true
+        Companion.isCallActive.value = true
+        activeConnection = this
         MyConnectionService.startForeground("Active call with " + (address?.schemeSpecificPart ?: "Unknown"))
-        
+
         // Update DB status to active
         dbHelper.insertCallLog(
             CallLogEntity(
@@ -602,9 +608,13 @@ class MyConnection(private val context: Context) : Connection() {
     private fun cleanup() {
         isRunning = false
         isCallActive = false
+        Companion.isCallActive.value = false
+        activeConnection = null
         micVolume.value = 0f
         botSpeaking.value = false
         agentStatus.value = AgentStatus.IDLE
+        lastLlmTtftMs.value = 0
+        lastTotalTurnMs.value = 0
         botSpeakingDebounceJob?.cancel()
         MyConnectionService.stopForeground()
 

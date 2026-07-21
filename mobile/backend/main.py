@@ -892,6 +892,8 @@ async def run_pipeline(websocket: WebSocket):
                 parts.append(f"Do not discuss: {new_settings['topics_to_avoid']}")
             if new_settings.get("custom_instructions"):
                 parts.append(new_settings["custom_instructions"])
+            if is_simulation and simulation_prompt:
+                parts.append(f"\n[CRITICAL SIMULATION SCENARIO / CUSTOM ROLEPLAY INSTRUCTION]:\n{simulation_prompt}")
             new_prompt = build_prompt(
                 agent_name=ns_agent,
                 org_name=ns_org,
@@ -907,9 +909,6 @@ async def run_pipeline(websocket: WebSocket):
 
         _session_prompt_updaters[session_id] = _refresh_prompt
 
-        # Reset context history for the new call session
-        context.messages.clear()
-        
         # Queue dynamic greeting message
         greeting = (
             f"Hi, this is {agent_name} from {org_name}! "

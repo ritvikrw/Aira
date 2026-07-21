@@ -230,7 +230,7 @@ fun CallHistoryScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Tab selection for separating simulated and standard calls
+            // Tab selection: All Calls / Simulated Only
             TabRow(
                 selectedTabIndex = selectedTabState,
                 containerColor = Color(0xFF1E1F35),
@@ -243,18 +243,18 @@ fun CallHistoryScreen(
                 Tab(
                     selected = selectedTabState == 0,
                     onClick = { selectedTabState = 0 },
-                    text = { Text("Standard Calls", fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                    text = { Text("All Calls", fontWeight = FontWeight.Bold, fontSize = 14.sp) }
                 )
                 Tab(
                     selected = selectedTabState == 1,
                     onClick = { selectedTabState = 1 },
-                    text = { Text("Simulated Calls", fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                    text = { Text("Simulated Only", fontWeight = FontWeight.Bold, fontSize = 14.sp) }
                 )
             }
 
             val filteredCallLogs = remember(callLogs, selectedTabState) {
                 callLogs.filter { log ->
-                    if (selectedTabState == 0) !log.isSimulation else log.isSimulation
+                    if (selectedTabState == 0) true else log.isSimulation
                 }
             }
 
@@ -287,7 +287,7 @@ fun CallHistoryScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = if (selectedTabState == 0) "Incoming calls handled by AIRA will appear here" else "Simulated calls run for testing will appear here",
+                        text = if (selectedTabState == 0) "No calls yet — real or simulated calls handled by AIRA appear here" else "Simulated calls run for testing will appear here",
                         color = Color.DarkGray,
                         fontSize = 12.sp,
                         textAlign = TextAlign.Center,
@@ -428,6 +428,14 @@ fun CallLogItem(
             Column(
                 horizontalAlignment = Alignment.End
             ) {
+                if (log.isSimulation) {
+                    Text(
+                        text = "SIM",
+                        color = Color(0xFF5A6BFA),
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 10.sp
+                    )
+                }
                 Text(
                     text = durationText,
                     color = Color.White,

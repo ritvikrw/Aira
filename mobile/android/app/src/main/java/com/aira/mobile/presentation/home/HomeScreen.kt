@@ -65,31 +65,33 @@ fun HomeScreen(
     val agentStatus by remember { MyConnection.agentStatus }
     val lastLlmTtftMs by remember { MyConnection.lastLlmTtftMs }
     val lastTotalTurnMs by remember { MyConnection.lastTotalTurnMs }
-    
+    val isCallActive by remember { MyConnection.isCallActive }
+
     var showSimulationDialog by remember { mutableStateOf(false) }
+    // Simulation prompt is the same as Agent Config's custom_instructions — one source of truth
     var simulationPrompt by remember {
-        mutableStateOf(sharedPreferences.getString("simulation_prompt", "Pretend you are a professional tech support assistant for AIRA. Speak in English or Hindi.") ?: "Pretend you are a professional tech support assistant for AIRA. Speak in English or Hindi.")
+        mutableStateOf(sharedPreferences.getString("custom_instructions", "") ?: "")
     }
-    var simulationCallerName by remember { mutableStateOf("Test Caller (Simulation)") }
-    var simulationNumber by remember { mutableStateOf("12345") }
     
-    // Refresh states periodically
-    LaunchedEffect(Unit) {
-        isDefaultDialer = telecomHelper.isDefaultDialer()
-        isPhoneAccountRegistered = telecomHelper.isPhoneAccountRegistered()
-        
-        val serverUrl = sharedPreferences.getString("server_url", "wss://web-ninaiv-production-c6ae.up.railway.app/ws") ?: "wss://web-ninaiv-production-c6ae.up.railway.app/ws"
+    val serverUrl = remember { sharedPreferences.getString("server_url", "wss://web-ninaiv-production-c6ae.up.railway.app/ws") ?: "wss://web-ninaiv-production-c6ae.up.railway.app/ws" }
+    val httpUrl = remember(serverUrl) {
         val scheme = if (serverUrl.startsWith("wss://")) "https://" else "http://"
         val noScheme = serverUrl.substringAfter("://").substringBefore("/ws").substringBefore("/")
         val host = noScheme.substringBefore(":")
         val portStr = noScheme.substringAfter(":", "")
-        val httpUrl = if (portStr.isNotEmpty()) {
+        if (portStr.isNotEmpty()) {
             val httpPort = if (portStr == "8000") "8001" else portStr
             "$scheme$host:$httpPort"
         } else {
             "$scheme$host"
         }
-        
+    }
+
+    // Refresh states periodically
+    LaunchedEffect(Unit) {
+        isDefaultDialer = telecomHelper.isDefaultDialer()
+        isPhoneAccountRegistered = telecomHelper.isPhoneAccountRegistered()
+
         agentRepository.fetchSettings(httpUrl) { map ->
             if (map != null) {
                 map["agent_enabled"]?.let {
@@ -288,19 +290,6 @@ fun HomeScreen(
                             onCheckedChange = { value ->
                                 agentEnabled = value
                                 sharedPreferences.edit().putBoolean("agent_enabled", value).apply()
-                                
-                                val serverUrl = sharedPreferences.getString("server_url", "wss://web-ninaiv-production-c6ae.up.railway.app/ws") ?: "wss://web-ninaiv-production-c6ae.up.railway.app/ws"
-                                val scheme = if (serverUrl.startsWith("wss://")) "https://" else "http://"
-                                val noScheme = serverUrl.substringAfter("://").substringBefore("/ws").substringBefore("/")
-                                val host = noScheme.substringBefore(":")
-                                val portStr = noScheme.substringAfter(":", "")
-                                val httpUrl = if (portStr.isNotEmpty()) {
-                                    val httpPort = if (portStr == "8000") "8001" else portStr
-                                    "$scheme$host:$httpPort"
-                                } else {
-                                    "$scheme$host"
-                                }
-                                
                                 agentRepository.saveSettings(httpUrl, mapOf("agent_enabled" to value.toString())) { _ -> }
                             },
                             colors = SwitchDefaults.colors(
@@ -346,32 +335,34 @@ fun HomeScreen(
                                 Text("Cartesia Ramya", color = Color.White, fontSize = 12.sp)
                             }
                         }
-                        if (lastLlmTtftMs > 0 || lastTotalTurnMs > 0) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            HorizontalDivider(color = Color(0xFF2C2D4A))
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column {
-                                    Text("LLM TTFT", color = Color.Gray, fontSize = 10.sp)
-                                    Text(
-                                        text = if (lastLlmTtftMs > 0) "${lastLlmTtftMs}ms" else "—",
-                                        color = if (lastLlmTtftMs < 800) Color(0xFF4CAF50) else Color(0xFFFFC107),
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text("Total Turn", color = Color.Gray, fontSize = 10.sp)
-                                    Text(
-                                        text = if (lastTotalTurnMs > 0) "${lastTotalTurnMs}ms" else "—",
-                                        color = if (lastTotalTurnMs < 2000) Color(0xFF4CAF50) else Color(0xFFFFC107),
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider(color = Color(0xFF2C2D4A))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("LLM TTFT", color = Color.Gray, fontSize = 10.sp)
+                                Text(
+                                    text = if (lastLlmTtftMs > 0) "${lastLlmTtftMs}ms" else "—",
+                                    color = if (lastLlmTtftMs == 0) Color.Gray
+                                            else if (lastLlmTtftMs < 800) Color(0xFF4CAF50)
+                                            else Color(0xFFFFC107),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("Total Turn", color = Color.Gray, fontSize = 10.sp)
+                                Text(
+                                    text = if (lastTotalTurnMs > 0) "${lastTotalTurnMs}ms" else "—",
+                                    color = if (lastTotalTurnMs == 0) Color.Gray
+                                            else if (lastTotalTurnMs < 2000) Color(0xFF4CAF50)
+                                            else Color(0xFFFFC107),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
@@ -491,40 +482,54 @@ fun HomeScreen(
                     }
                 }
 
-                // Debug / Simulation Button
-                Button(
-                    onClick = {
-                        showSimulationDialog = true
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF5A6BFA)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
-                    Text(
-                        text = "Simulate Incoming Call (Audio Echo)",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                if (isCallActive) {
+                    // End Call button — shown during active call
+                    Button(
+                        onClick = { MyConnection.activeConnection?.onDisconnect() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                    ) {
+                        Text(
+                            text = "End Call",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                } else {
+                    // Simulate button — shown when no call is active
+                    Button(
+                        onClick = { showSimulationDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5A6BFA)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Text(
+                            text = "Simulate Incoming Call",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
 
-        // Custom Simulation Scenario Dialog
+        // Simulation Dialog — prompt is the same as Agent Config's custom_instructions
         if (showSimulationDialog) {
             AlertDialog(
                 onDismissRequest = { showSimulationDialog = false },
                 title = {
                     Text(
-                        text = "Simulate Call Scenario",
+                        text = "Simulate Incoming Call",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp
@@ -536,15 +541,14 @@ fun HomeScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text(
-                            text = "Set up your custom prompt scenario below:",
+                            text = "Custom instructions for this call (same as Agent Config):",
                             color = Color.LightGray,
                             fontSize = 12.sp
                         )
-                        
                         OutlinedTextField(
                             value = simulationPrompt,
                             onValueChange = { simulationPrompt = it },
-                            label = { Text("Simulation Prompt/Role") },
+                            label = { Text("Agent Instructions") },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
@@ -554,14 +558,21 @@ fun HomeScreen(
                                 unfocusedLabelColor = Color.Gray
                             ),
                             modifier = Modifier.fillMaxWidth(),
-                            maxLines = 5
+                            maxLines = 6
                         )
                     }
                 },
                 confirmButton = {
                     Button(
                         onClick = {
-                            sharedPreferences.edit().putString("simulation_prompt", simulationPrompt).apply()
+                            // Save to SharedPrefs + server as custom_instructions
+                            sharedPreferences.edit()
+                                .putString("custom_instructions", simulationPrompt)
+                                .apply()
+                            agentRepository.saveSettings(
+                                httpUrl,
+                                mapOf("custom_instructions" to simulationPrompt)
+                            ) { _ -> }
                             telecomHelper.simulateIncomingCall(
                                 callerName = "Test Caller (Simulation)",
                                 callerNumber = "12345"
