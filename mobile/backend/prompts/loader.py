@@ -27,4 +27,5 @@ def build_prompt(
         instructions=instructions,
     )
     lang_module = _LANGUAGE_MODULES.get(language, en_IN)
-    return f"{base}\n\n{lang_module.PROMPT}"
+    lang_prompt = lang_module.PROMPT.replace("{agent_name}", agent_name).replace("{org_name}", org_name)
+    return f"{base}\n\n{lang_prompt}"

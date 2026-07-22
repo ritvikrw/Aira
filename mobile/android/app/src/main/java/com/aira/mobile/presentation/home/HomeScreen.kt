@@ -74,6 +74,12 @@ fun HomeScreen(
     var simulationPrompt by remember {
         mutableStateOf(sharedPreferences.getString("custom_instructions", "") ?: "")
     }
+    var simulationBusinessName by remember {
+        mutableStateOf(sharedPreferences.getString("simulation_business_name", "Siddharth Biryani") ?: "Siddharth Biryani")
+    }
+    var simulationAgentName by remember {
+        mutableStateOf(sharedPreferences.getString("simulation_agent_name", "AIRA") ?: "AIRA")
+    }
     
     val serverUrl = remember { sharedPreferences.getString("server_url", "wss://web-ninaiv-production-c6ae.up.railway.app/ws") ?: "wss://web-ninaiv-production-c6ae.up.railway.app/ws" }
     val httpUrl = remember(serverUrl) {
@@ -531,6 +537,38 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        OutlinedTextField(
+                            value = simulationBusinessName,
+                            onValueChange = { simulationBusinessName = it },
+                            label = { Text("Business Name") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF5A6BFA),
+                                unfocusedBorderColor = Color.Gray,
+                                focusedLabelColor = Color(0xFF8A9AFA),
+                                unfocusedLabelColor = Color.Gray
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = simulationAgentName,
+                            onValueChange = { simulationAgentName = it },
+                            label = { Text("AI Name") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF5A6BFA),
+                                unfocusedBorderColor = Color.Gray,
+                                focusedLabelColor = Color(0xFF8A9AFA),
+                                unfocusedLabelColor = Color.Gray
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
                         Text(
                             text = "Custom instructions for this call (same as Agent Config):",
                             color = Color.LightGray,
@@ -558,10 +596,16 @@ fun HomeScreen(
                         onClick = {
                             sharedPreferences.edit()
                                 .putString("custom_instructions", simulationPrompt)
+                                .putString("simulation_business_name", simulationBusinessName)
+                                .putString("simulation_agent_name", simulationAgentName)
                                 .apply()
                             agentRepository.saveSettings(
                                 httpUrl,
-                                mapOf("custom_instructions" to simulationPrompt)
+                                mapOf(
+                                    "custom_instructions" to simulationPrompt,
+                                    "org_name" to simulationBusinessName,
+                                    "agent_name" to simulationAgentName
+                                )
                             ) { _ -> }
                             telecomHelper.simulateIncomingCall(
                                 callerName = "Test Caller (Simulation)",

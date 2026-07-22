@@ -203,7 +203,9 @@ class MyConnection(private val context: Context) : Connection() {
         }
 
         val isSim = isSimulation || callerNum == "12345"
-        val simulationPrompt = sharedPreferences.getString("simulation_prompt", "") ?: ""
+        val simulationPrompt = sharedPreferences.getString("custom_instructions", "") ?: ""
+        val businessName = sharedPreferences.getString("simulation_business_name", "Siddharth Biryani") ?: "Siddharth Biryani"
+        val agentName = sharedPreferences.getString("simulation_agent_name", "AIRA") ?: "AIRA"
         val cleanNumber = callerNum.replace(Regex("[^0-9+]"), "")
         var wsUrl = if (serverUrl.contains("?")) {
             "$serverUrl&session_id=$sessionId&caller_phone=$cleanNumber"
@@ -213,6 +215,10 @@ class MyConnection(private val context: Context) : Connection() {
 
         if (isSim) {
             wsUrl += "&is_simulation=true"
+            val encodedBusiness = java.net.URLEncoder.encode(businessName, "UTF-8")
+            wsUrl += "&business_name=$encodedBusiness"
+            val encodedAgent = java.net.URLEncoder.encode(agentName, "UTF-8")
+            wsUrl += "&agent_name=$encodedAgent"
             if (simulationPrompt.isNotEmpty()) {
                 val encodedPrompt = java.net.URLEncoder.encode(simulationPrompt, "UTF-8")
                 wsUrl += "&simulation_prompt=$encodedPrompt"
@@ -566,18 +572,18 @@ class MyConnection(private val context: Context) : Connection() {
                 bufferSize
             )
 
-            val sessionId = audioRecord?.audioSessionId ?: 0
-            if (sessionId != 0) {
+            val audioSessionId = audioRecord?.audioSessionId ?: 0
+            if (audioSessionId != 0) {
                 if (AcousticEchoCanceler.isAvailable()) {
-                    AcousticEchoCanceler.create(sessionId)?.enabled = true
+                    AcousticEchoCanceler.create(audioSessionId)?.enabled = true
                     Log.i(TAG, "Local Echo AcousticEchoCanceler enabled")
                 }
                 if (NoiseSuppressor.isAvailable()) {
-                    NoiseSuppressor.create(sessionId)?.enabled = true
+                    NoiseSuppressor.create(audioSessionId)?.enabled = true
                     Log.i(TAG, "Local Echo NoiseSuppressor enabled")
                 }
                 if (AutomaticGainControl.isAvailable()) {
-                    AutomaticGainControl.create(sessionId)?.enabled = true
+                    AutomaticGainControl.create(audioSessionId)?.enabled = true
                     Log.i(TAG, "Local Echo AutomaticGainControl enabled")
                 }
             }

@@ -43,7 +43,8 @@ from pipecat.frames.frames import (
     TextFrame,
     LLMFullResponseEndFrame,
     TTSSpeakFrame,
-    InterruptionFrame
+    InterruptionFrame,
+    ErrorFrame
 )
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
@@ -60,8 +61,9 @@ except Exception as e:
 
 # Import Pipecat services
 from pipecat.services.groq.llm import GroqLLMService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.services.llm_service import FunctionCallParams
 
 # Import custom WebSocket Transport from server
@@ -275,6 +277,8 @@ async def init_db():
 
 # Database Helper Functions
 async def fetch_settings() -> dict:
+    if not db_pool:
+        return {}
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch("SELECT key, value FROM agent_settings")
@@ -492,39 +496,39 @@ class RawFrameSerializer(FrameSerializer):
         return None
 
 
-class TranscriptInterceptor(FrameProcessor):
-    def __init__(self, serializer, get_session_id, llm, task, context=None, **kwargs):
+class UserTranscriptInterceptor(FrameProcessor):
+    def __init__(self, serializer, get_session_id, context=None, llm=None, agent_interceptor=None, tts=None, stt=None, **kwargs):
         super().__init__(**kwargs)
         self.serializer = serializer
         self.get_session_id = get_session_id
-        self.llm = llm
-        self.task = task
         self.context = context
+        self.llm = llm
+        self.agent_interceptor = agent_interceptor
+        self.tts = tts
+        self.stt = stt
+        self.task = None
         self.agent_name = "AIRA"
         self.org_name = ""
         self.org_description = ""
         self.instructions = ""
         self.current_system_prompt = ""
-        self.current_agent_response = []
         self.caller_name_saved = False
-        self.language_locked = False
+        self.language_locked = True
         self.current_language = "en-IN"
-        self.turn_latencies = []
-        self.turn_total_latencies = []
-        self.llm_start_time = None
-        self.first_token_received = True
-        self.current_ttft = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        await self.push_frame(frame, direction)
         
+        if isinstance(frame, ErrorFrame):
+            logger.error(f"!!! PIPELINE ERROR INTERCEPTED (UserInterceptor) !!! Error: {frame.error} | Fatal: {frame.fatal}")
+            
         if isinstance(frame, TranscriptionFrame):
             text = frame.text
             # Filter out noise / echo transcripts — too short or empty
             if not text or len(text.strip()) < 4:
                 logger.info(f"Dropping noisy transcript: {text!r}")
                 return
+
             logger.info(f"User transcript: {text}")
             sess_id = self.get_session_id()
             asyncio.create_task(save_transcript(sess_id, "user", text))
@@ -536,29 +540,15 @@ class TranscriptInterceptor(FrameProcessor):
                     logger.warning("System prompt was missing from context — re-injecting")
                     self.context.messages.insert(0, {"role": "system", "content": self.current_system_prompt})
 
-            # Trim context to system prompt + last 20 messages to avoid 429 rate limits
+            # Trim context to system prompt + last 10 messages to avoid 429 rate limits
             if self.context:
                 system_msgs = [m for m in self.context.messages if m.get("role") == "system"]
                 other_msgs = [m for m in self.context.messages if m.get("role") != "system"]
-                if len(other_msgs) > 20:
-                    self.context.messages[:] = system_msgs + other_msgs[-20:]
+                if len(other_msgs) > 10:
+                    self.context.messages[:] = system_msgs + other_msgs[-10:]
                     logger.debug(f"Context trimmed to {len(self.context.messages)} messages")
 
-            # Log context state before LLM call
-            if self.context:
-                sys_count = sum(1 for m in self.context.messages if m.get("role") == "system")
-                total_count = len(self.context.messages)
-                sys_preview = ""
-                for m in self.context.messages:
-                    if m.get("role") == "system":
-                        sys_preview = str(m.get("content", ""))[:100]
-                        break
-                logger.info(f"Context before LLM: {total_count} msgs ({sys_count} system). System preview: {sys_preview}")
-
-            # Start timer for TTFT
-            self.llm_start_time = asyncio.get_event_loop().time()
-            self.first_token_received = False
-            
+            # Broadcast user transcript to the mobile client
             if self.serializer.websocket:
                 try:
                     await self.serializer.websocket.send_text(json.dumps({
@@ -568,6 +558,11 @@ class TranscriptInterceptor(FrameProcessor):
                     }))
                 except Exception as e:
                     logger.error(f"Error sending user transcript: {e}")
+
+            # Start timer for TTFT
+            if self.agent_interceptor:
+                self.agent_interceptor.llm_start_time = asyncio.get_event_loop().time()
+                self.agent_interceptor.first_token_received = False
 
             # Check for user name
             if not self.caller_name_saved:
@@ -579,23 +574,20 @@ class TranscriptInterceptor(FrameProcessor):
             
             # Language switching detection
             lower = text.lower()
+            detected = match_language(text)
             should_switch = False
-            detected = None
-            if not self.language_locked:
-                detected = match_language(text)
-                if detected:
+            if detected:
+                # If we are at the start of the call (first 2 turns) or they use an action keyword
+                action_keywords = ["speak", "talk", "switch", "change", "in", "please", "want", "use", "select", "choose"]
+                is_start_of_call = (self.context and len(self.context.messages) <= 4)
+                if is_start_of_call or any(kw in lower for kw in action_keywords):
                     should_switch = True
                     self.language_locked = True
-            else:
-                if any(p in lower for p in _SWITCH_PHRASES):
-                    detected = match_language(text)
-                    if detected:
-                        should_switch = True
                         
             if should_switch and detected and detected != self.current_language:
                 logger.info(f"Switching language from {self.current_language} to {detected}")
                 self.current_language = detected
-
+                # Rebuild and update LLM system instruction
                 system_prompt = build_prompt(
                     agent_name=self.agent_name,
                     org_name=self.org_name,
@@ -606,6 +598,41 @@ class TranscriptInterceptor(FrameProcessor):
                 self.current_system_prompt = system_prompt
                 self.llm._settings.system_instruction = system_prompt
                 
+                # Update system prompt inside LLMContext messages list
+                if self.context:
+                    system_found = False
+                    for msg in self.context.messages:
+                        if msg.get("role") == "system":
+                            msg["content"] = system_prompt
+                            system_found = True
+                            break
+                    if not system_found:
+                        self.context.messages.insert(0, {"role": "system", "content": system_prompt})
+                    logger.info("System prompt updated inside LLMContext messages list")
+                
+                # Update TTS language setting dynamically
+                if self.tts:
+                    try:
+                        asyncio.create_task(self.tts._update_settings(self.tts.Settings(language=detected)))
+                        logger.info(f"TTS settings updated to language: {detected}")
+                    except Exception as e:
+                        logger.error(f"Failed to update TTS language setting: {e}")
+
+                # Update STT language setting dynamically (locks STT to only transcribe target language)
+                if self.stt:
+                    try:
+                        from pipecat.transcriptions.language import Language
+                        lang_enum = None
+                        for l in Language:
+                            if l.value == detected:
+                                lang_enum = l
+                                break
+                        if lang_enum:
+                            asyncio.create_task(self.stt._update_settings(self.stt.Settings(language=lang_enum)))
+                            logger.info(f"STT settings updated to language: {detected} ({lang_enum})")
+                    except Exception as e:
+                        logger.error(f"Failed to update STT language setting: {e}")
+
                 # Push a confirmation message bypass LLM
                 confirmations = {
                     "hi-IN": "Sure, switching to Hindi now!",
@@ -619,7 +646,46 @@ class TranscriptInterceptor(FrameProcessor):
                 if self.task:
                     asyncio.create_task(self.task.queue_frames([TTSSpeakFrame(text=phrase, append_to_context=False)]))
                     
-        elif isinstance(frame, TextFrame):
+                # Append switch message to LLM context
+                if self.context:
+                    self.context.add_message({"role": "user", "content": text})
+                    self.context.add_message({"role": "assistant", "content": phrase})
+                return
+
+        await self.push_frame(frame, direction)
+
+
+class AgentTranscriptInterceptor(FrameProcessor):
+    def __init__(self, serializer, get_session_id, llm, **kwargs):
+        super().__init__(**kwargs)
+        self.serializer = serializer
+        self.get_session_id = get_session_id
+        self.llm = llm
+        self.user_interceptor = None
+        self.current_agent_response = []
+        self.llm_start_time = None
+        self.first_token_received = True
+        self.current_ttft = 0
+        self.turn_latencies = []
+        self.turn_total_latencies = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        
+        if isinstance(frame, ErrorFrame):
+            logger.error(f"!!! PIPELINE ERROR INTERCEPTED (AgentInterceptor) !!! Error: {frame.error} | Fatal: {frame.fatal}")
+            
+        # Filter out empty or punctuation-only text/speak frames to prevent Sarvam TTS 400 errors
+        if isinstance(frame, (TextFrame, TTSSpeakFrame)):
+            text = frame.text
+            # Only filter out frames that consist entirely of standard English punctuation or whitespace
+            if not text or all(c in ".,?!;:()[]{}\"'`~@#$%^&*+-=_|\\/ \t\n\r" for c in text):
+                logger.info(f"Filtering out empty/punctuation-only text frame: {text!r}")
+                return
+
+        await self.push_frame(frame, direction)
+        
+        if isinstance(frame, TextFrame):
             self.current_agent_response.append(frame.text)
             
             # Measure TTFT when the first token/text is received from LLM for this turn
@@ -631,9 +697,9 @@ class TranscriptInterceptor(FrameProcessor):
             
         elif isinstance(frame, LLMFullResponseEndFrame):
             full_text = "".join(self.current_agent_response).strip()
+            sess_id = self.get_session_id()
             if full_text:
                 logger.info(f"Agent transcript: {full_text}")
-                sess_id = self.get_session_id()
                 asyncio.create_task(save_transcript(sess_id, "agent", full_text))
                 
                 # Broadcast agent transcript to the mobile client
@@ -656,11 +722,6 @@ class TranscriptInterceptor(FrameProcessor):
 
                 if self.serializer.websocket:
                     try:
-                        await self.serializer.websocket.send_text(json.dumps({
-                            "type": "transcript",
-                            "speaker": "agent",
-                            "text": full_text
-                        }))
                         # Broadcast latency metrics
                         await self.serializer.websocket.send_text(json.dumps({
                             "type": "metrics",
@@ -668,14 +729,14 @@ class TranscriptInterceptor(FrameProcessor):
                             "total_turn_ms": total_latency
                         }))
                     except Exception as e:
-                        logger.error(f"Error sending agent transcript/metrics: {e}")
+                        logger.error(f"Error sending agent metrics: {e}")
 
                 # Check for agent echoing/saving name
-                if not self.caller_name_saved:
+                if self.user_interceptor and not self.user_interceptor.caller_name_saved:
                     m = _AGENT_NAME_RE.search(full_text) or _AGENT_ECHO_NAME_RE.match(full_text)
                     if m:
                         name = m.group(1).strip().title()
-                        self.caller_name_saved = True
+                        self.user_interceptor.caller_name_saved = True
                         asyncio.create_task(persist_caller_name(sess_id, name))
 
             self.current_agent_response = []
@@ -772,27 +833,56 @@ async def run_pipeline(websocket: WebSocket):
     )
     logger.info("STT provider initialized: Sarvam STT (saarika:v2.5)")
     
-    # Cap responses at ~120 tokens for short, tight replies (per prompt: 2-4 sentences)
-    llm_kwargs = {
-        "api_key": os.getenv("GROQ_API_KEY_AIRA", "dummy_key"),
-        "model": "llama-3.1-8b-instant",
-    }
-    try:
-        from pipecat.services.groq.llm import GroqLLMService as _GLS
-        if hasattr(_GLS, "InputParams"):
-            llm_kwargs["params"] = _GLS.InputParams(max_tokens=120, temperature=0.6)
-    except Exception:
-        pass
-    llm = GroqLLMService(**llm_kwargs)
-    logger.info("LLM provider initialized: Groq (llama-3.1-8b-instant, max_tokens=120)")
+    # Dynamic LLM provider selection (Gemini vs Groq)
+    llm_provider = os.getenv("LLM_PROVIDER", "").lower()
+    groq_key = os.getenv("GROQ_API_KEY_AIRA", "") or os.getenv("GROQ_API_KEY", "")
+    gemini_key = os.getenv("GOOGLE_API_KEY_AIRA", "") or os.getenv("GEMINI_API_KEY_AIRA", "") or os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+
+    if not llm_provider:
+        if gemini_key:
+            llm_provider = "google"
+        else:
+            llm_provider = "groq"
+
+    if llm_provider == "google":
+        gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+        llm = GoogleLLMService(
+            api_key=gemini_key or "dummy_key",
+            model=gemini_model,
+            settings=GoogleLLMService.Settings(
+                max_tokens=120,
+                temperature=0.6
+            )
+        )
+        masked_key = f"{gemini_key[:6]}...{gemini_key[-4:]}" if len(gemini_key) > 10 else "None"
+        logger.info(f"LLM provider initialized: Google Gemini ({gemini_model}, max_tokens=120) | Active Key: {masked_key}")
+    else:
+        # Cap responses at ~120 tokens for short, tight replies (per prompt: 2-4 sentences)
+        llm_kwargs = {
+            "api_key": groq_key or "dummy_key",
+            "model": "llama-3.1-8b-instant",
+        }
+        try:
+            from pipecat.services.groq.llm import GroqLLMService as _GLS
+            if hasattr(_GLS, "InputParams"):
+                llm_kwargs["params"] = _GLS.InputParams(max_tokens=120, temperature=0.6)
+        except Exception:
+            pass
+        llm = GroqLLMService(**llm_kwargs)
+        logger.info("LLM provider initialized: Groq (llama-3.1-8b-instant, max_tokens=120)")
     
-    default_voice = _resolved_cartesia_voice_id or os.getenv("CARTESIA_VOICE_ID_AIRA", "f039066f-cdb7-45ed-b51d-1034ae2f04a0")
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY_AIRA", "dummy_key"),
-        voice_id=default_voice,
+    sarvam_key = os.getenv("SARVAM_API_KEY_AIRA", "") or os.getenv("SARVAM_API_KEY", "")
+    tts = SarvamTTSService(
+        api_key=sarvam_key,
+        settings=SarvamTTSService.Settings(
+            model="bulbul:v3",
+            voice="shubh",
+            language="en-IN",
+            enable_preprocessing=True
+        ),
         sample_rate=16000
     )
-    logger.info(f"TTS provider initialized: Cartesia (voice_id={default_voice})")
+    logger.info("TTS provider initialized: Sarvam TTS (bulbul:v3, voice_id=shubh)")
 
     # Configure Context and Aggregators
     context = LLMContext()
@@ -811,7 +901,9 @@ async def run_pipeline(websocket: WebSocket):
 
     # Setup interceptor with None task initially (will assign task after creation)
     get_session_id = lambda: session_id
-    interceptor = TranscriptInterceptor(serializer, get_session_id, llm, None, context=context)
+    agent_interceptor = AgentTranscriptInterceptor(serializer, get_session_id, llm)
+    user_interceptor = UserTranscriptInterceptor(serializer, get_session_id, context, llm, agent_interceptor, tts, stt)
+    agent_interceptor.user_interceptor = user_interceptor
 
     # Setup VAD — strict thresholds to reject echo & background noise
     vad = None
@@ -836,9 +928,10 @@ async def run_pipeline(websocket: WebSocket):
     
     pipeline_elements.extend([
         stt,
+        user_interceptor,
         context_pair.user(),
         llm,
-        interceptor,
+        agent_interceptor,
         tts,
         transport.output(),
         context_pair.assistant()
@@ -847,7 +940,7 @@ async def run_pipeline(websocket: WebSocket):
     pipeline = Pipeline(pipeline_elements)
     
     task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
-    interceptor.task = task
+    user_interceptor.task = task
 
     # Implement and Register Knowledge Base Search Tool
     async def search_knowledge_base(params: FunctionCallParams, query: str):
@@ -863,7 +956,7 @@ async def run_pipeline(websocket: WebSocket):
         phrase = random.choice(_KB_FILLERS)
         await task.queue_frames([TTSSpeakFrame(text=phrase, append_to_context=False)])
         
-        lang = interceptor.current_language[:2] # e.g. "te" from "te-IN"
+        lang = user_interceptor.current_language[:2] # e.g. "te" from "te-IN"
         try:
             payload = {"query": query, "k": 2, "language": lang}
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -921,14 +1014,16 @@ async def run_pipeline(websocket: WebSocket):
         
         is_simulation = websocket_conn.query_params.get("is_simulation", "false").lower() == "true"
         simulation_prompt = websocket_conn.query_params.get("simulation_prompt", "")
+        business_name = websocket_conn.query_params.get("business_name", "")
+        agent_name_param = websocket_conn.query_params.get("agent_name", "")
         
         # Register call in database
         asyncio.create_task(register_call(session_id, caller_phone, is_simulation))
         
         # Fetch settings from API
         settings = await fetch_settings()
-        agent_name = settings.get("agent_name", "AIRA")
-        org_name = settings.get("org_name", "")
+        agent_name = agent_name_param.strip() if agent_name_param.strip() else settings.get("agent_name", "AIRA")
+        org_name = business_name.strip() if business_name.strip() else settings.get("org_name", "")
         org_description = settings.get("org_description", "")
         default_language = settings.get("default_language", "en-IN")
         
@@ -971,16 +1066,14 @@ async def run_pipeline(websocket: WebSocket):
                     session_id, len(system_prompt), len(context.messages), system_prompt[:120])
         
         # Update interceptor settings
-        interceptor.agent_name = agent_name
-        interceptor.org_name = org_name
-        interceptor.org_description = org_description
-        interceptor.instructions = instructions
-        interceptor.current_system_prompt = system_prompt
-        interceptor.current_language = default_language
-        interceptor.language_locked = False
-        interceptor.caller_name_saved = False
-        interceptor.turn_latencies = []
-        interceptor.turn_total_latencies = []
+        user_interceptor.agent_name = agent_name
+        user_interceptor.org_name = org_name
+        user_interceptor.org_description = org_description
+        user_interceptor.instructions = instructions
+        user_interceptor.current_system_prompt = system_prompt
+        user_interceptor.current_language = default_language
+        user_interceptor.language_locked = True
+        user_interceptor.caller_name_saved = False
 
         # Register mid-call prompt refresh callback for this session
         async def _refresh_prompt(new_settings: dict):
@@ -1001,11 +1094,12 @@ async def run_pipeline(websocket: WebSocket):
             new_prompt = build_prompt(
                 agent_name=ns_agent,
                 org_name=ns_org,
-                language=interceptor.current_language,
+                language=user_interceptor.current_language,
                 org_description=ns_desc,
                 instructions="\n".join(parts)
             )
-            interceptor.current_system_prompt = new_prompt
+            user_interceptor.current_system_prompt = new_prompt
+            llm._settings.system_instruction = new_prompt
             updated = False
             for msg in context.messages:
                 if msg.get("role") == "system":
@@ -1018,11 +1112,8 @@ async def run_pipeline(websocket: WebSocket):
 
         _session_prompt_updaters[session_id] = _refresh_prompt
 
-        # Queue dynamic greeting message
-        greeting = (
-            f"Hi, this is {agent_name} from {org_name}! "
-            f"Which language would you like to speak in?"
-        )
+        # Play predefined English greeting first so LLM starts call naturally
+        greeting = f"Hi, I am {agent_name} from {org_name}. Which language do you want to speak?"
         await task.queue_frames([TTSSpeakFrame(text=greeting, append_to_context=True)])
 
     @transport.event_handler("on_client_disconnected")
@@ -1032,11 +1123,11 @@ async def run_pipeline(websocket: WebSocket):
         _session_prompt_updaters.pop(session_id, None)
         # End call and summarize
         avg_ttft = 0
-        if hasattr(interceptor, "turn_latencies") and interceptor.turn_latencies:
-            avg_ttft = int(sum(interceptor.turn_latencies) / len(interceptor.turn_latencies))
+        if hasattr(agent_interceptor, "turn_latencies") and agent_interceptor.turn_latencies:
+            avg_ttft = int(sum(agent_interceptor.turn_latencies) / len(agent_interceptor.turn_latencies))
         avg_total_latency = 0
-        if hasattr(interceptor, "turn_total_latencies") and interceptor.turn_total_latencies:
-            avg_total_latency = int(sum(interceptor.turn_total_latencies) / len(interceptor.turn_total_latencies))
+        if hasattr(agent_interceptor, "turn_total_latencies") and agent_interceptor.turn_total_latencies:
+            avg_total_latency = int(sum(agent_interceptor.turn_total_latencies) / len(agent_interceptor.turn_total_latencies))
         asyncio.create_task(end_call(session_id, avg_ttft, avg_total_latency))
 
     runner = PipelineRunner()
