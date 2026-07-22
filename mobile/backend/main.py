@@ -918,7 +918,18 @@ async def run_pipeline(websocket: WebSocket):
     logger.info("TTS provider initialized: Sarvam TTS (bulbul:v3, voice_id=shubh)")
 
     # Configure Context and Aggregators
-    context = LLMContext()
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
+
+    context = LLMContext(
+        tools=[
+            FunctionSchema(
+                name="hang_up",
+                description="End the phone call. Call this ONLY when the caller explicitly says goodbye, bye, wants to hang up, or asks to end the call.",
+                properties={},
+                required=[]
+            )
+        ]
+    )
     # Start strategy: fire on VAD (immediate) + transcription (fallback), so bot interrupts instantly
     start_strategies = []
     if _VAD_TURN_STRAT_AVAILABLE:
@@ -945,11 +956,11 @@ async def run_pipeline(websocket: WebSocket):
             vad_params = VADParams(
                 confidence=0.85,      # higher = stricter speech detection
                 start_secs=0.35,      # need 350ms of speech to start (rejects background noise)
-                stop_secs=0.5,        # 500ms of silence to stop
+                stop_secs=0.8,        # 800ms of silence to stop (prevents cutting off mid-sentence)
                 min_volume=0.8,       # reject quiet ambient/distant sounds
             )
             vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=vad_params))
-            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.35, stop_secs=0.5, min_volume=0.8)")
+            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.35, stop_secs=0.8, min_volume=0.8)")
         except Exception as e:
             logger.warning(f"Could not instantiate Silero VAD: {e}")
             vad = None
@@ -1022,7 +1033,6 @@ async def run_pipeline(websocket: WebSocket):
             logger.error(f"KB search failed: {e}")
             await params.result_callback("Knowledge base unavailable. Tell the caller you'll get someone to call them back.")
 
-    llm.register_function("search_knowledge_base", search_knowledge_base)
 
     async def hang_up(params: FunctionCallParams):
         """End the phone call. Call this ONLY when the caller explicitly says goodbye, bye, wants to hang up, or asks to end the call."""
