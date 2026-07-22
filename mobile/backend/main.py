@@ -496,6 +496,39 @@ class RawFrameSerializer(FrameSerializer):
         return None
 
 
+def get_message_role(msg) -> str:
+    # If msg is an LLMSpecificMessage, get its inner message
+    if hasattr(msg, "message"):
+        msg = msg.message
+    # If msg is a dict, get role
+    if isinstance(msg, dict):
+        return msg.get("role", "")
+    # If msg has role attribute (e.g. Google types.Content)
+    if hasattr(msg, "role"):
+        return msg.role or ""
+    return ""
+
+def update_message_content(msg, content: str) -> bool:
+    # Unpack LLMSpecificMessage
+    is_specific = hasattr(msg, "message")
+    inner = msg.message if is_specific else msg
+    
+    if isinstance(inner, dict):
+        inner["content"] = content
+        return True
+    elif hasattr(inner, "role") and hasattr(inner, "parts"):
+        # Google types.Content
+        if inner.parts:
+            if hasattr(inner.parts[0], "text"):
+                inner.parts[0].text = content
+            else:
+                inner.parts[0] = content
+        else:
+            inner.parts = [content]
+        return True
+    return False
+
+
 class UserTranscriptInterceptor(FrameProcessor):
     def __init__(self, serializer, get_session_id, context=None, llm=None, agent_interceptor=None, tts=None, stt=None, **kwargs):
         super().__init__(**kwargs)
@@ -535,15 +568,15 @@ class UserTranscriptInterceptor(FrameProcessor):
 
             # Bulletproof: ensure system prompt is present before every LLM call
             if self.context and self.current_system_prompt:
-                has_system = any(m.get("role") == "system" for m in self.context.messages)
+                has_system = any(get_message_role(m) == "system" for m in self.context.messages)
                 if not has_system:
                     logger.warning("System prompt was missing from context — re-injecting")
                     self.context.messages.insert(0, {"role": "system", "content": self.current_system_prompt})
 
             # Trim context to system prompt + last 10 messages to avoid 429 rate limits
             if self.context:
-                system_msgs = [m for m in self.context.messages if m.get("role") == "system"]
-                other_msgs = [m for m in self.context.messages if m.get("role") != "system"]
+                system_msgs = [m for m in self.context.messages if get_message_role(m) == "system"]
+                other_msgs = [m for m in self.context.messages if get_message_role(m) != "system"]
                 if len(other_msgs) > 10:
                     self.context.messages[:] = system_msgs + other_msgs[-10:]
                     logger.debug(f"Context trimmed to {len(self.context.messages)} messages")
@@ -602,8 +635,8 @@ class UserTranscriptInterceptor(FrameProcessor):
                 if self.context:
                     system_found = False
                     for msg in self.context.messages:
-                        if msg.get("role") == "system":
-                            msg["content"] = system_prompt
+                        if get_message_role(msg) == "system":
+                            update_message_content(msg, system_prompt)
                             system_found = True
                             break
                     if not system_found:
