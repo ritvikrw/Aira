@@ -102,26 +102,31 @@ class AgentApiService @Inject constructor(
     }
 
     fun fetchCallHistory(baseUrl: String, callback: (JSONArray?) -> Unit) {
+        android.util.Log.i("AgentApiService", "fetchCallHistory: Fetching from $baseUrl/calls")
         val request = Request.Builder()
             .url("$baseUrl/calls")
             .build()
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                android.util.Log.e("AgentApiService", "fetchCallHistory failed: ${e.message}", e)
                 callback(null)
             }
 
             override fun onResponse(call: Call, response: Response) {
                 response.use {
+                    android.util.Log.i("AgentApiService", "fetchCallHistory response: code=${response.code}")
                     if (!response.isSuccessful) {
                         callback(null)
                         return
                     }
                     try {
                         val bodyString = response.body?.string() ?: "[]"
+                        android.util.Log.i("AgentApiService", "fetchCallHistory body length: ${bodyString.length}")
                         val jsonArray = JSONArray(bodyString)
                         callback(jsonArray)
                     } catch (e: Exception) {
+                        android.util.Log.e("AgentApiService", "fetchCallHistory parse error: ${e.message}", e)
                         callback(null)
                     }
                 }

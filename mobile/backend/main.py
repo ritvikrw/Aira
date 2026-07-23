@@ -156,9 +156,13 @@ async def get_calls():
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT session_id, caller_id, caller_name, status, call_start_time, call_end_time, call_duration_seconds, is_simulation, llm_ttft_ms, total_latency_ms 
-                FROM call_logs 
-                ORDER BY call_start_time DESC
+                SELECT cl.session_id, cl.caller_id, cl.caller_name, cl.status, 
+                       cl.call_start_time, cl.call_end_time, cl.call_duration_seconds, 
+                       cl.is_simulation, cl.llm_ttft_ms, cl.total_latency_ms,
+                       cs.summary_text
+                FROM call_logs cl
+                LEFT JOIN call_summaries cs ON cl.session_id = cs.session_id
+                ORDER BY cl.call_start_time DESC
             """)
             calls = []
             for r in rows:
@@ -172,11 +176,48 @@ async def get_calls():
                     "call_duration_seconds": r['call_duration_seconds'],
                     "is_simulation": r.get('is_simulation', False) if hasattr(r, 'get') else r['is_simulation'],
                     "llm_ttft_ms": r.get('llm_ttft_ms', 0) if hasattr(r, 'get') else r['llm_ttft_ms'],
-                    "total_latency_ms": r.get('total_latency_ms', 0) if hasattr(r, 'get') else r['total_latency_ms']
+                    "total_latency_ms": r.get('total_latency_ms', 0) if hasattr(r, 'get') else r['total_latency_ms'],
+                    "summary_text": r.get('summary_text') or ""
                 })
             return calls
     except Exception as e:
         logger.error("API failed to get calls: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_app.get("/calls/{session_id}")
+async def get_call_detail(session_id: str):
+    if not db_pool:
+        raise HTTPException(status_code=404, detail="DB offline")
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT cl.session_id, cl.caller_id, cl.caller_name, cl.status, 
+                       cl.call_start_time, cl.call_end_time, cl.call_duration_seconds, 
+                       cl.is_simulation, cl.llm_ttft_ms, cl.total_latency_ms,
+                       cs.summary_text
+                FROM call_logs cl
+                LEFT JOIN call_summaries cs ON cl.session_id = cs.session_id
+                WHERE cl.session_id = $1
+            """, session_id)
+            if not row:
+                raise HTTPException(status_code=404, detail="Call not found")
+            return {
+                "session_id": row['session_id'],
+                "caller_phone": row['caller_id'] or "Unknown",
+                "caller_name": row['caller_name'] or "Incoming Call",
+                "status": row['status'],
+                "call_start_time": row['call_start_time'].isoformat() if row['call_start_time'] else None,
+                "call_end_time": row['call_end_time'].isoformat() if row['call_end_time'] else None,
+                "call_duration_seconds": row['call_duration_seconds'],
+                "is_simulation": row.get('is_simulation', False) if hasattr(row, 'get') else row['is_simulation'],
+                "llm_ttft_ms": row.get('llm_ttft_ms', 0) if hasattr(row, 'get') else row['llm_ttft_ms'],
+                "total_latency_ms": row.get('total_latency_ms', 0) if hasattr(row, 'get') else row['total_latency_ms'],
+                "summary_text": row.get('summary_text') or ""
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("API failed to get call detail: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_app.get("/transcripts/{session_id}")
@@ -356,7 +397,7 @@ async def summarize_call_in_db(session_id: str):
                 return
             dialog = "\n".join([f"{r['speaker'].upper()}: {r['message']}" for r in rows])
             
-            api_key = os.getenv("GOOGLE_API_KEY_AIRA", "")
+            api_key = os.getenv("GOOGLE_API_KEY_AIRA", "") or os.getenv("GEMINI_API_KEY_AIRA", "") or os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
             if not api_key:
                 logger.warning("No GOOGLE_API_KEY for summarization")
                 return
@@ -369,7 +410,7 @@ async def summarize_call_in_db(session_id: str):
 
 Return ONLY valid JSON with this structure:
 {{
-  "summary_text": "2-4 sentence overview of the entire call",
+  "summary_text": "A very short, 1-2 sentence overview of the call",
   "call_category": "<one of the categories below>",
   "key_topics": ["topic1", "topic2"],
   "action_items": ["action1", "action2"]
@@ -385,15 +426,16 @@ Categories:
 - "Other": anything that doesn't fit the above
 
 Rules:
-- summary_text: what the caller wanted and how it was resolved
+- summary_text: Keep it very brief and concise (1-2 sentences maximum). Focus ONLY on the core intent of the caller. If the call was just a brief greeting, background noise, or got disconnected without any actual request or action, make the summary extremely short (e.g., 'The call ended after a brief greeting; no specific request was made.'). Expand only if the caller made a reservation, placed an order, or left an important message to convey to the owner.
 - key_topics: specific subjects discussed (max 5, concise short phrases). NEVER include caller names, agent names, or phone/contact numbers.
 - action_items: any follow-ups needed (empty list if none)
 
 Transcript:
 {dialog}"""
 
+            gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
             response = client.models.generate_content(
-                model='gemini-3.5-flash',
+                model=gemini_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json"
@@ -938,7 +980,7 @@ async def run_pipeline(websocket: WebSocket):
     user_params = LLMUserAggregatorParams(
         user_turn_strategies=UserTurnStrategies(
             start=start_strategies,
-            stop=[ExternalUserTurnStopStrategy(timeout=0.8)]
+            stop=[ExternalUserTurnStopStrategy(timeout=1.2)]
         )
     )
     context_pair = LLMContextAggregatorPair(context, user_params=user_params)
@@ -954,13 +996,13 @@ async def run_pipeline(websocket: WebSocket):
     if _VAD_AVAILABLE:
         try:
             vad_params = VADParams(
-                confidence=0.85,      # higher = stricter speech detection
-                start_secs=0.35,      # need 350ms of speech to start (rejects background noise)
-                stop_secs=0.8,        # 800ms of silence to stop (prevents cutting off mid-sentence)
-                min_volume=0.8,       # reject quiet ambient/distant sounds
+                confidence=0.85,      # stricter confidence to filter out background speech
+                start_secs=0.35,      # require 350ms to verify it's actual speech
+                stop_secs=0.8,        # 800ms of silence to stop
+                min_volume=0.40,      # reject background chatter/noise (0.40 is good for direct mouth-mic)
             )
             vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=vad_params))
-            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.35, stop_secs=0.8, min_volume=0.8)")
+            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.35, stop_secs=0.8, min_volume=0.40)")
         except Exception as e:
             logger.warning(f"Could not instantiate Silero VAD: {e}")
             vad = None

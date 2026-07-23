@@ -76,8 +76,10 @@ fun CallHistoryScreen(
                 isLoading = false
             }
         }
+        android.util.Log.i("CallHistoryScreen", "Syncing call history from: $httpUrl/calls")
         agentRepository.fetchCallHistory(httpUrl) { jsonArray ->
-            if (jsonArray != null && jsonArray.length() > 0) {
+            if (jsonArray != null) {
+                android.util.Log.i("CallHistoryScreen", "Successfully fetched ${jsonArray.length()} calls from server")
                 val serverList = mutableListOf<CallLogEntity>()
                 try {
                     val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
@@ -106,7 +108,8 @@ fun CallHistoryScreen(
                                 durationSeconds = obj.optInt("call_duration_seconds"),
                                 isSimulation = obj.optBoolean("is_simulation", false),
                                 ttftMs = obj.optInt("llm_ttft_ms", 0),
-                                totalLatencyMs = obj.optInt("total_latency_ms", 0)
+                                totalLatencyMs = obj.optInt("total_latency_ms", 0),
+                                summaryText = obj.optString("summary_text", "")
                             )
                         )
                     }
@@ -114,18 +117,47 @@ fun CallHistoryScreen(
                     val serverIds = serverList.map { it.sessionId }.toSet()
                     val localOnly = callLogs.filter { it.sessionId !in serverIds }
                     callLogs = (serverList + localOnly).sortedByDescending { it.startTime }
-                } catch (_: Exception) { }
+                    android.util.Log.i("CallHistoryScreen", "Call history merged. Total list size: ${callLogs.size}")
+                } catch (e: Exception) {
+                    android.util.Log.e("CallHistoryScreen", "Error merging call history: ${e.message}", e)
+                }
+            } else {
+                android.util.Log.e("CallHistoryScreen", "Server call history fetch returned null")
             }
         }
     }
 
-    // Load transcripts when a log is selected
-    LaunchedEffect(selectedLogForTranscript) {
+    // Load transcripts and latest summary when a log is selected
+    LaunchedEffect(selectedLogForTranscript?.sessionId) {
         selectedLogForTranscript?.let { log ->
+            val client = okhttp3.OkHttpClient()
+
+            // Fetch latest summary from server (since background summarization takes a few seconds)
+            val detailUrl = "$httpUrl/calls/${log.sessionId}"
+            val detailRequest = okhttp3.Request.Builder().url(detailUrl).build()
+            client.newCall(detailRequest).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {}
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    response.use {
+                        if (response.isSuccessful) {
+                            try {
+                                val bodyString = response.body?.string() ?: ""
+                                if (bodyString.isNotEmpty()) {
+                                    val obj = org.json.JSONObject(bodyString)
+                                    val summaryText = obj.optString("summary_text", "")
+                                    if (summaryText.isNotEmpty()) {
+                                        selectedLogForTranscript = log.copy(summaryText = summaryText)
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+            })
+
             // Try loading transcripts from server, fallback to SQLite
             val transcriptsUrl = "$httpUrl/transcripts/${log.sessionId}"
             val request = okhttp3.Request.Builder().url(transcriptsUrl).build()
-            val client = okhttp3.OkHttpClient()
             client.newCall(request).enqueue(object : okhttp3.Callback {
                 override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
                     scope.launch(Dispatchers.IO) {
@@ -509,6 +541,39 @@ fun TranscriptViewerDialog(
                                 color = Color(0xFF4CAF50),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                if (log.summaryText.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Surface(
+                        color = Color(0xFF2C2D4A).copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF5A6BFA).copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "AI Summary",
+                                    color = Color(0xFF8A9AFA),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "🪄",
+                                    fontSize = 12.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = log.summaryText,
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp
                             )
                         }
                     }

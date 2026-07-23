@@ -16,7 +16,8 @@ data class CallLogEntity(
     val durationSeconds: Int = 0,
     val isSimulation: Boolean = false,
     val ttftMs: Int = 0,
-    val totalLatencyMs: Int = 0
+    val totalLatencyMs: Int = 0,
+    val summaryText: String = ""
 )
 
 data class TranscriptEntity(
@@ -30,7 +31,7 @@ data class TranscriptEntity(
 class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
     companion object {
         private const val DATABASE_NAME = "aira_calls.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
         private const val TAG = "CallDatabaseHelper"
 
         // Table Names
@@ -48,6 +49,7 @@ class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         private const val COL_CALL_IS_SIMULATION = "is_simulation"
         private const val COL_CALL_TTFT_MS = "ttft_ms"
         private const val COL_CALL_TOTAL_LATENCY_MS = "total_latency_ms"
+        private const val COL_CALL_SUMMARY_TEXT = "summary_text"
 
         // Transcripts Columns
         private const val COL_TRANS_ID = "id"
@@ -69,7 +71,8 @@ class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
                 $COL_CALL_DURATION INTEGER,
                 $COL_CALL_IS_SIMULATION INTEGER DEFAULT 0,
                 $COL_CALL_TTFT_MS INTEGER DEFAULT 0,
-                $COL_CALL_TOTAL_LATENCY_MS INTEGER DEFAULT 0
+                $COL_CALL_TOTAL_LATENCY_MS INTEGER DEFAULT 0,
+                $COL_CALL_SUMMARY_TEXT TEXT DEFAULT ''
             )
         """.trimIndent()
 
@@ -114,6 +117,7 @@ class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put(COL_CALL_IS_SIMULATION, if (callLog.isSimulation) 1 else 0)
             put(COL_CALL_TTFT_MS, callLog.ttftMs)
             put(COL_CALL_TOTAL_LATENCY_MS, callLog.totalLatencyMs)
+            put(COL_CALL_SUMMARY_TEXT, callLog.summaryText)
         }
         db.insertWithOnConflict(TABLE_CALL_LOGS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
@@ -177,7 +181,8 @@ class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
                 val isSim = cursor.getInt(cursor.getColumnIndexOrThrow(COL_CALL_IS_SIMULATION)) == 1
                 val ttft = cursor.getInt(cursor.getColumnIndexOrThrow(COL_CALL_TTFT_MS))
                 val totalLat = cursor.getInt(cursor.getColumnIndexOrThrow(COL_CALL_TOTAL_LATENCY_MS))
-                list.add(CallLogEntity(sessionId, number, name, status, startTime, endTime, duration, isSim, ttft, totalLat))
+                val summaryText = cursor.getString(cursor.getColumnIndexOrThrow(COL_CALL_SUMMARY_TEXT)) ?: ""
+                list.add(CallLogEntity(sessionId, number, name, status, startTime, endTime, duration, isSim, ttft, totalLat, summaryText))
             } while (cursor.moveToNext())
         }
         cursor.close()
