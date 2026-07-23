@@ -361,6 +361,8 @@ class MyConnection(private val context: Context) : Connection() {
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
 
+            val recordSessionId = audioRecord?.audioSessionId ?: 0
+
             audioTrack = AudioTrack.Builder()
                 .setAudioAttributes(audioAttrs)
                 .setAudioFormat(
@@ -372,6 +374,7 @@ class MyConnection(private val context: Context) : Connection() {
                 )
                 .setBufferSizeInBytes(bufferSize)
                 .setTransferMode(AudioTrack.MODE_STREAM)
+                .setSessionId(recordSessionId) // Share session ID for hardware echo cancellation (AEC)
                 .build()
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {

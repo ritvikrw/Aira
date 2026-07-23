@@ -244,7 +244,7 @@ async def get_calls():
                 SELECT cl.session_id, cl.caller_id, cl.caller_name, cl.status, 
                        cl.call_start_time, cl.call_end_time, cl.call_duration_seconds, 
                        cl.is_simulation, cl.llm_ttft_ms, cl.total_latency_ms,
-                       cs.summary_text
+                       cs.summary_text, cs.action_needed
                 FROM call_logs cl
                 LEFT JOIN call_summaries cs ON cl.session_id = cs.session_id
                 ORDER BY cl.call_start_time DESC
@@ -262,7 +262,8 @@ async def get_calls():
                     "is_simulation": r.get('is_simulation', False) if hasattr(r, 'get') else r['is_simulation'],
                     "llm_ttft_ms": r.get('llm_ttft_ms', 0) if hasattr(r, 'get') else r['llm_ttft_ms'],
                     "total_latency_ms": r.get('total_latency_ms', 0) if hasattr(r, 'get') else r['total_latency_ms'],
-                    "summary_text": r.get('summary_text') or ""
+                    "summary_text": r.get('summary_text') or "",
+                    "action_needed": r.get('action_needed') or ""
                 })
             return calls
     except Exception as e:
@@ -279,7 +280,7 @@ async def get_call_detail(session_id: str):
                 SELECT cl.session_id, cl.caller_id, cl.caller_name, cl.status, 
                        cl.call_start_time, cl.call_end_time, cl.call_duration_seconds, 
                        cl.is_simulation, cl.llm_ttft_ms, cl.total_latency_ms,
-                       cs.summary_text
+                       cs.summary_text, cs.action_needed
                 FROM call_logs cl
                 LEFT JOIN call_summaries cs ON cl.session_id = cs.session_id
                 WHERE cl.session_id = $1
@@ -297,7 +298,8 @@ async def get_call_detail(session_id: str):
                 "is_simulation": row.get('is_simulation', False) if hasattr(row, 'get') else row['is_simulation'],
                 "llm_ttft_ms": row.get('llm_ttft_ms', 0) if hasattr(row, 'get') else row['llm_ttft_ms'],
                 "total_latency_ms": row.get('total_latency_ms', 0) if hasattr(row, 'get') else row['total_latency_ms'],
-                "summary_text": row.get('summary_text') or ""
+                "summary_text": row.get('summary_text') or "",
+                "action_needed": row.get('action_needed') or ""
             }
     except HTTPException:
         raise
@@ -374,9 +376,11 @@ async def init_db():
                 call_category   VARCHAR(64) DEFAULT 'Other',
                 key_topics      TEXT[],
                 action_items    TEXT[],
+                action_needed   TEXT,
                 created_at      TIMESTAMPTZ DEFAULT NOW()
             );
         """)
+        await conn.execute("ALTER TABLE call_summaries ADD COLUMN IF NOT EXISTS action_needed TEXT;")
         # Seed default settings if empty
         rows = await conn.fetch("SELECT key FROM agent_settings")
         existing_keys = {row['key'] for row in rows}
@@ -472,6 +476,15 @@ async def end_call(session_id: str, avg_ttft: int = 0, avg_total_latency: int = 
     except Exception as e:
         logger.error("Failed to end call in DB %s: %s", session_id, e)
 
+from pydantic import BaseModel, Field
+
+class CallSummarySchema(BaseModel):
+    summary_text: str = Field(description="A very short, 1-2 sentence overview of the call")
+    call_category: str = Field(description="One of the allowed categories: Product Enquiry, Support Request, Billing & Pricing, Appointment / Booking, General Information, Complaint, Other")
+    key_topics: list[str] = Field(description="Specific subjects discussed (max 5, concise short phrases). NEVER include caller names, agent names, or phone/contact numbers.")
+    action_items: list[str] = Field(description="Any follow-ups needed (empty list if none)")
+    action_needed: str | None = Field(default=None, description="A single prominent action statement for the team/owner if the caller requested a callback, follow-up, demo scheduling, or assistance. Otherwise must be set to null or an empty string.")
+
 async def summarize_call_in_db(session_id: str):
     try:
         async with db_pool.acquire() as conn:
@@ -480,6 +493,15 @@ async def summarize_call_in_db(session_id: str):
                 return
             dialog = "\n".join([f"{r['speaker'].upper()}: {r['message']}" for r in rows])
             
+            # Fetch business name dynamically for the summarization prompt
+            business_name = "Company"
+            try:
+                biz_row = await conn.fetchrow("SELECT value FROM agent_settings WHERE key = 'business_name'")
+                if biz_row and biz_row['value']:
+                    business_name = biz_row['value']
+            except Exception:
+                pass
+
             api_key = os.getenv("GOOGLE_API_KEY_AIRA", "") or os.getenv("GEMINI_API_KEY_AIRA", "") or os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
             if not api_key:
                 logger.warning("No GOOGLE_API_KEY for summarization")
@@ -490,14 +512,6 @@ async def summarize_call_in_db(session_id: str):
             
             client = genai.Client(api_key=api_key)
             prompt = f"""You are a call summarization assistant. Given a phone call transcript between a caller (USER) and an AI receptionist (AGENT), produce a concise JSON summary.
-
-Return ONLY valid JSON with this structure:
-{{
-  "summary_text": "A very short, 1-2 sentence overview of the call",
-  "call_category": "<one of the categories below>",
-  "key_topics": ["topic1", "topic2"],
-  "action_items": ["action1", "action2"]
-}}
 
 Categories:
 - "Product Enquiry": caller asked about a product, service, feature, pricing, or requested a demo
@@ -512,6 +526,7 @@ Rules:
 - summary_text: Keep it very brief and concise (1-2 sentences maximum). Focus ONLY on the core intent of the caller. If the call was just a brief greeting, background noise, or got disconnected without any actual request or action, make the summary extremely short (e.g., 'The call ended after a brief greeting; no specific request was made.'). Expand only if the caller made a reservation, placed an order, or left an important message to convey to the owner.
 - key_topics: specific subjects discussed (max 5, concise short phrases). NEVER include caller names, agent names, or phone/contact numbers.
 - action_items: any follow-ups needed (empty list if none)
+- action_needed: Critical: If the caller explicitly requested a follow-up, callback, demo scheduling, or left details requiring a company/owner action, extract a single action statement for the team. This must be dynamically generated based on the actual conversation details (such as the caller's name, requested date/time, and target action). Format template: '[Business Name] team to call [Caller Name] at [Time] to [Action]' (e.g. '{business_name} team to call John tomorrow at 2:00 p.m. to schedule a demo'). If details like the caller's name or preferred callback time are not explicitly mentioned in the conversation transcript, use generic placeholders such as 'the caller' or 'as soon as possible' (e.g. '{business_name} team to call the caller as soon as possible to book a large handi') so that the action statement is still successfully created. IMPORTANT: If no follow-up action is required from the company/owner team, set `action_needed` to null or an empty string. Only set it if the team or owner needs to take action based on the call.
 
 Transcript:
 {dialog}"""
@@ -521,7 +536,8 @@ Transcript:
                 model=gemini_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
+                    response_mime_type="application/json",
+                    response_schema=CallSummarySchema
                 ),
             )
             
@@ -530,6 +546,7 @@ Transcript:
             call_category = res.get("call_category", "Other")
             key_topics = res.get("key_topics", [])
             action_items = res.get("action_items", [])
+            action_needed = res.get("action_needed") or ""
             
             # Safe upsert using select-then-update/insert
             exists = await conn.fetchval("SELECT 1 FROM call_summaries WHERE session_id = $1", session_id)
@@ -539,14 +556,15 @@ Transcript:
                         summary_text = $1,
                         call_category = $2,
                         key_topics = $3,
-                        action_items = $4
-                    WHERE session_id = $5
-                """, summary_text, call_category, key_topics, action_items, session_id)
+                        action_items = $4,
+                        action_needed = $5
+                    WHERE session_id = $6
+                """, summary_text, call_category, key_topics, action_items, action_needed, session_id)
             else:
                 await conn.execute("""
-                    INSERT INTO call_summaries (session_id, summary_text, call_category, key_topics, action_items)
-                    VALUES ($1, $2, $3, $4, $5)
-                """, session_id, summary_text, call_category, key_topics, action_items)
+                    INSERT INTO call_summaries (session_id, summary_text, call_category, key_topics, action_items, action_needed)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                """, session_id, summary_text, call_category, key_topics, action_items, action_needed)
             logger.info("Call summary saved directly to DB for session: %s", session_id)
     except Exception as e:
         logger.error("Failed to generate/save call summary: %s", e)
@@ -687,6 +705,16 @@ class UserTranscriptInterceptor(FrameProcessor):
                 logger.info(f"Dropping noisy transcript: {text!r}")
                 return
 
+            # Filter out background noise description hallucinations from STT (e.g. "Background noise.", "[laughter]", etc.)
+            clean_text = text.strip().lower().rstrip(".")
+            noise_hallucinations = {
+                "background noise", "ambient noise", "noise",
+                "[noise]", "[background noise]", "[music]", "[laughter]"
+            }
+            if clean_text in noise_hallucinations:
+                logger.info(f"Dropping noise/silence transcription hallucination: {text!r}")
+                return
+
             logger.info(f"User transcript: {text}")
             sess_id = self.get_session_id()
             asyncio.create_task(save_transcript(sess_id, "user", text))
@@ -745,10 +773,7 @@ class UserTranscriptInterceptor(FrameProcessor):
             if should_switch and detected and detected != self.current_language:
                 logger.info(f"Switching language from {self.current_language} to {detected}")
                 self.current_language = detected
-                # Rebuild system instruction using structured format
-                system_prompt = f"""You are {self.agent_name}, an AI Phone Receptionist representing {getattr(self, 'business_name', 'Aira Solutions')}.
-
-[BUSINESS HOURS]:
+                instructions = f"""[BUSINESS HOURS]:
 {getattr(self, 'business_hours', '')}
 
 [AGENT INSTRUCTIONS - HOW YOU SHOULD SPEAK]:
@@ -757,10 +782,13 @@ class UserTranscriptInterceptor(FrameProcessor):
 [TOPICS TO AVOID]:
 {getattr(self, 'topics_to_avoid', '')}"""
 
-                from prompts.loader import _LANGUAGE_MODULES, en_IN
-                lang_module = _LANGUAGE_MODULES.get(detected, en_IN)
-                lang_prompt = lang_module.PROMPT.replace("{agent_name}", self.agent_name).replace("{org_name}", getattr(self, 'business_name', 'Aira Solutions'))
-                system_prompt = f"{system_prompt}\n\n{lang_prompt}"
+                from prompts.loader import build_prompt
+                system_prompt = build_prompt(
+                    agent_name=self.agent_name,
+                    org_name=getattr(self, 'business_name', 'Aira Solutions'),
+                    language=detected,
+                    instructions=instructions
+                )
                 self.current_system_prompt = system_prompt
                 self.llm._settings.system_instruction = system_prompt
                 
@@ -994,7 +1022,9 @@ async def run_pipeline(websocket: WebSocket):
     # Initialize STT, LLM, TTS services
     stt = SarvamSTTService(
         api_key=os.getenv("SARVAM_API_KEY_AIRA", "dummy_key"),
-        model="saarika:v2.5",
+        settings=SarvamSTTService.Settings(
+            model="saarika:v2.5",
+        ),
         sample_rate=16000
     )
     logger.info("STT provider initialized: Sarvam STT (saarika:v2.5)")
@@ -1014,8 +1044,8 @@ async def run_pipeline(websocket: WebSocket):
         gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
         llm = GoogleLLMService(
             api_key=gemini_key or "dummy_key",
-            model=gemini_model,
             settings=GoogleLLMService.Settings(
+                model=gemini_model,
                 max_tokens=120,
                 temperature=0.6
             )
@@ -1089,11 +1119,11 @@ async def run_pipeline(websocket: WebSocket):
             vad_params = VADParams(
                 confidence=0.85,      # stricter confidence to filter out background speech
                 start_secs=0.35,      # require 350ms to verify it's actual speech
-                stop_secs=0.8,        # 800ms of silence to stop
+                stop_secs=1.2,        # 1.2s of silence to stop (prevents cutting off half-words)
                 min_volume=0.40,      # reject background chatter/noise (0.40 is good for direct mouth-mic)
             )
             vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=vad_params))
-            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.35, stop_secs=0.8, min_volume=0.40)")
+            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.35, stop_secs=1.2, min_volume=0.40)")
         except Exception as e:
             logger.warning(f"Could not instantiate Silero VAD: {e}")
             vad = None
@@ -1211,9 +1241,7 @@ async def run_pipeline(websocket: WebSocket):
             agent_instructions += f"\n\n[CRITICAL SIMULATION SCENARIO / CUSTOM ROLEPLAY INSTRUCTION]:\n{simulation_prompt}"
             
         # Build system prompt using structured format
-        system_prompt = f"""You are {agent_name}, an AI Phone Receptionist representing {business_name_val}.
-
-[BUSINESS HOURS]:
+        instructions = f"""[BUSINESS HOURS]:
 {business_hours}
 
 [AGENT INSTRUCTIONS - HOW YOU SHOULD SPEAK]:
@@ -1222,11 +1250,13 @@ async def run_pipeline(websocket: WebSocket):
 [TOPICS TO AVOID]:
 {topics_to_avoid}"""
 
-        # Append localized instructions from prompts pack
-        from prompts.loader import _LANGUAGE_MODULES, en_IN
-        lang_module = _LANGUAGE_MODULES.get(default_language, en_IN)
-        lang_prompt = lang_module.PROMPT.replace("{agent_name}", agent_name).replace("{org_name}", business_name_val)
-        system_prompt = f"{system_prompt}\n\n{lang_prompt}"
+        from prompts.loader import build_prompt
+        system_prompt = build_prompt(
+            agent_name=agent_name,
+            org_name=business_name_val,
+            language=default_language,
+            instructions=instructions
+        )
         
         # Set LLM context with system prompt — mutate list in-place to survive property quirks
         try:
@@ -1262,9 +1292,7 @@ async def run_pipeline(websocket: WebSocket):
             if is_simulation and simulation_prompt:
                 ns_instructions += f"\n\n[CRITICAL SIMULATION SCENARIO / CUSTOM ROLEPLAY INSTRUCTION]:\n{simulation_prompt}"
                 
-            new_prompt = f"""You are {ns_agent}, an AI Phone Receptionist representing {ns_business}.
-
-[BUSINESS HOURS]:
+            ns_instructions_block = f"""[BUSINESS HOURS]:
 {ns_hours}
 
 [AGENT INSTRUCTIONS - HOW YOU SHOULD SPEAK]:
@@ -1273,10 +1301,13 @@ async def run_pipeline(websocket: WebSocket):
 [TOPICS TO AVOID]:
 {ns_avoid}"""
 
-            from prompts.loader import _LANGUAGE_MODULES, en_IN
-            lang_module = _LANGUAGE_MODULES.get(user_interceptor.current_language, en_IN)
-            lang_prompt = lang_module.PROMPT.replace("{agent_name}", ns_agent).replace("{org_name}", ns_business)
-            new_prompt = f"{new_prompt}\n\n{lang_prompt}"
+            from prompts.loader import build_prompt
+            new_prompt = build_prompt(
+                agent_name=ns_agent,
+                org_name=ns_business,
+                language=user_interceptor.current_language,
+                instructions=ns_instructions_block
+            )
             
             user_interceptor.current_system_prompt = new_prompt
             llm._settings.system_instruction = new_prompt
@@ -1296,19 +1327,28 @@ async def run_pipeline(websocket: WebSocket):
         greeting = f"Hi, I am {agent_name} from {business_name_val}. Which language do you want to speak?"
         await task.queue_frames([TTSSpeakFrame(text=greeting, append_to_context=True)])
 
-    @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, websocket_conn):
-        logger.info("Client disconnected")
-        serializer.websocket = None
-        _session_prompt_updaters.pop(session_id, None)
-        # End call and summarize
+    call_ended_triggered = False
+
+    async def trigger_end_call():
+        nonlocal call_ended_triggered
+        if call_ended_triggered:
+            return
+        call_ended_triggered = True
         avg_ttft = 0
         if hasattr(agent_interceptor, "turn_latencies") and agent_interceptor.turn_latencies:
             avg_ttft = int(sum(agent_interceptor.turn_latencies) / len(agent_interceptor.turn_latencies))
         avg_total_latency = 0
         if hasattr(agent_interceptor, "turn_total_latencies") and agent_interceptor.turn_total_latencies:
             avg_total_latency = int(sum(agent_interceptor.turn_total_latencies) / len(agent_interceptor.turn_total_latencies))
-        asyncio.create_task(end_call(session_id, avg_ttft, avg_total_latency))
+        await end_call(session_id, avg_ttft, avg_total_latency)
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, websocket_conn):
+        logger.info("Client disconnected")
+        serializer.websocket = None
+        _session_prompt_updaters.pop(session_id, None)
+        # End call and summarize
+        asyncio.create_task(trigger_end_call())
 
     runner = PipelineRunner()
     await runner.add_workers(task)
@@ -1317,6 +1357,8 @@ async def run_pipeline(websocket: WebSocket):
         await runner.run()
     except Exception as e:
         logger.error(f"Error running pipeline runner: {e}")
+    finally:
+        await trigger_end_call()
 
 @api_app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

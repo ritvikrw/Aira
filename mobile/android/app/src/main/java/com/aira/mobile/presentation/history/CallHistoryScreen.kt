@@ -97,7 +97,8 @@ fun CallHistoryScreen(
                                 isSimulation = obj.optBoolean("is_simulation", false),
                                 ttftMs = obj.optInt("llm_ttft_ms", 0),
                                 totalLatencyMs = obj.optInt("total_latency_ms", 0),
-                                summaryText = obj.optString("summary_text", "")
+                                summaryText = obj.optString("summary_text", ""),
+                                actionNeeded = obj.optString("action_needed", "")
                             )
                         )
                     }
@@ -133,8 +134,12 @@ fun CallHistoryScreen(
                                 if (bodyString.isNotEmpty()) {
                                     val obj = org.json.JSONObject(bodyString)
                                     val summaryText = obj.optString("summary_text", "")
-                                    if (summaryText.isNotEmpty()) {
-                                        selectedLogForTranscript = log.copy(summaryText = summaryText)
+                                    val actionNeeded = obj.optString("action_needed", "")
+                                    if (summaryText.isNotEmpty() || actionNeeded.isNotEmpty()) {
+                                        selectedLogForTranscript = log.copy(
+                                            summaryText = summaryText.ifEmpty { log.summaryText },
+                                            actionNeeded = actionNeeded.ifEmpty { log.actionNeeded }
+                                        )
                                     }
                                 }
                             } catch (_: Exception) {}
@@ -422,6 +427,32 @@ fun CallLogItem(
                     color = Color.Gray,
                     fontSize = 12.sp
                 )
+                if (log.summaryText.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = log.summaryText,
+                        color = Color.LightGray.copy(alpha = 0.8f),
+                        fontSize = 13.sp,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+                if (log.actionNeeded.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        color = Color(0xFFFFF3E0),
+                        shape = RoundedCornerShape(4.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB74D))
+                    ) {
+                        Text(
+                            text = "Action needed",
+                            color = Color(0xFFE65100),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
                 if (log.ttftMs > 0 || log.totalLatencyMs > 0) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(
@@ -529,6 +560,35 @@ fun TranscriptViewerDialog(
                                 color = Color(0xFF4CAF50),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                if (log.actionNeeded.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Surface(
+                        color = Color(0xFFFFFDF9),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFCC80)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(top = 5.dp, end = 8.dp)
+                                    .size(8.dp)
+                                    .background(Color(0xFFFF9800), androidx.compose.foundation.shape.CircleShape)
+                            )
+                            Text(
+                                text = "Action — ${log.actionNeeded}",
+                                color = Color(0xFF8C3E00),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 18.sp
                             )
                         }
                     }
