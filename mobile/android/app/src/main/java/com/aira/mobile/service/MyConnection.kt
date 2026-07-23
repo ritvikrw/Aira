@@ -64,6 +64,9 @@ class MyConnection(private val context: Context) : Connection() {
     private var isSimulation = false
     private var customCallerName = "Incoming Call"
     
+    @Volatile
+    private var shouldPlayAudio = true
+    
     private var botSpeakingDebounceJob: Job? = null
     private val debounceScope = CoroutineScope(Dispatchers.Main)
 
@@ -183,6 +186,7 @@ class MyConnection(private val context: Context) : Connection() {
 
     @Synchronized
     private fun connectToWebSocket() {
+        shouldPlayAudio = true
         if (webSocket != null) {
             Log.w(TAG, "connectToWebSocket: WebSocket connection already active")
             return
@@ -238,6 +242,9 @@ class MyConnection(private val context: Context) : Connection() {
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                if (!shouldPlayAudio) {
+                    return
+                }
                 // Play synthesized audio packet received from Pipecat
                 val audioData = bytes.toByteArray()
                 audioTrack?.write(audioData, 0, audioData.size)
@@ -278,7 +285,11 @@ class MyConnection(private val context: Context) : Connection() {
                         }
                     } else if (msgType == "interrupted") {
                         Log.i(TAG, "Interruption received, stopping current audio playback")
+                        shouldPlayAudio = false
                         stopAudioPlayback()
+                    } else if (msgType == "audio_start") {
+                        Log.i(TAG, "New audio turn started, enabling playback")
+                        shouldPlayAudio = true
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to parse text message JSON", e)

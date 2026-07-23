@@ -614,13 +614,26 @@ class RawFrameSerializer(FrameSerializer):
     def __init__(self):
         super().__init__()
         self.websocket = None
+        self.audio_started = False
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         # Convert outgoing TTS audio frames to raw binary bytes sent over WebSocket
         if isinstance(frame, OutputAudioRawFrame):
+            if not self.audio_started:
+                self.audio_started = True
+                logger.info("First audio frame of the turn, sending audio_start signal to client")
+                if self.websocket:
+                    try:
+                        await self.websocket.send_text(json.dumps({"type": "audio_start"}))
+                    except Exception as e:
+                        logger.error(f"Error sending audio_start signal: {e}")
             return frame.audio
         elif isinstance(frame, InterruptionFrame):
+            self.audio_started = False
             return json.dumps({"type": "interrupted"})
+        elif type(frame).__name__ == "LLMContextAssistantTurnFrame":
+            self.audio_started = False
+            return None
         return None
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
@@ -691,6 +704,8 @@ class UserTranscriptInterceptor(FrameProcessor):
         self.caller_name_saved = False
         self.language_locked = True
         self.current_language = "en-IN"
+        self.user_is_speaking = False
+        self.speech_detected_in_current_turn = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -698,22 +713,59 @@ class UserTranscriptInterceptor(FrameProcessor):
         if isinstance(frame, ErrorFrame):
             logger.error(f"!!! PIPELINE ERROR INTERCEPTED (UserInterceptor) !!! Error: {frame.error} | Fatal: {frame.fatal}")
             
+        # Track VAD speaking state dynamically
+        if type(frame).__name__ == "VADUserStartedSpeakingFrame":
+            self.user_is_speaking = True
+            self.speech_detected_in_current_turn = True
+            logger.info("VAD detected user speech started")
+        elif type(frame).__name__ == "VADUserStoppedSpeakingFrame":
+            self.user_is_speaking = False
+            logger.info("VAD detected user speech stopped")
+
         if isinstance(frame, TranscriptionFrame):
             text = frame.text
-            # Filter out noise / echo transcripts — too short or empty
-            if not text or len(text.strip()) < 4:
-                logger.info(f"Dropping noisy transcript: {text!r}")
+            
+            # Punctuation-Only Filter: Drop if text is empty or consists entirely of punctuation/whitespace
+            clean_text = text.strip()
+            if not clean_text or all(c in ".,?!;:()[]{}\"'`~@#$%^&*+-=_|\\/ \t\n\r" for c in clean_text):
+                logger.info(f"Dropping empty or punctuation-only transcript: {text!r}")
                 return
 
-            # Filter out background noise description hallucinations from STT (e.g. "Background noise.", "[laughter]", etc.)
-            clean_text = text.strip().lower().rstrip(".")
-            noise_hallucinations = {
-                "background noise", "ambient noise", "noise",
-                "[noise]", "[background noise]", "[music]", "[laughter]"
+            # Filler-Word Filter (All Regional Languages)
+            normalized_text = clean_text.lower().rstrip(".,?!")
+            fillers = {
+                "హా", "హ", "हाँ", "हा", "ह", "হ্যাঁ", "হা", "হ", "ஆ", "ആ"
             }
-            if clean_text in noise_hallucinations:
-                logger.info(f"Dropping noise/silence transcription hallucination: {text!r}")
+            if normalized_text in fillers:
+                logger.info(f"Dropping noise/filler word: {text!r}")
                 return
+
+            # Dynamic VAD Check: If VAD indicates user is silent and no speech was detected in this turn, drop it
+            if not getattr(self, "user_is_speaking", False) and not getattr(self, "speech_detected_in_current_turn", False):
+                logger.info(f"Dropping silence/hum transcription hallucination: {text!r}")
+                return
+            
+            # Reset flag only if the user has finished speaking (VAD is inactive)
+            # This ensures multiple transcripts during a single continuous speech turn are all allowed.
+            if not getattr(self, "user_is_speaking", False):
+                self.speech_detected_in_current_turn = False
+
+            # Language Mismatch Check
+            if self.current_language != "en-IN":
+                # Check if text is ASCII-only (meaning it's an English transcript hallucinated during a regional call)
+                is_pure_english = all(ord(c) < 128 for c in clean_text.replace(".", "").replace("?", "").replace("!", "").strip())
+                if is_pure_english:
+                    logger.info(f"Dropping English STT hallucination during regional language call: {text!r}")
+                    return
+            else:
+                # English Call Blocklist: Drop known Whisper silence hallucinations
+                noise_hallucinations = {
+                    "sir, i request you to please sit down",
+                    "thank you for watching", "please subscribe"
+                }
+                if normalized_text in noise_hallucinations:
+                    logger.info(f"Dropping English silence hallucination: {text!r}")
+                    return
 
             logger.info(f"User transcript: {text}")
             sess_id = self.get_session_id()
@@ -889,6 +941,23 @@ class AgentTranscriptInterceptor(FrameProcessor):
                 self.turn_latencies.append(self.current_ttft)
                 logger.info(f">>> LATENCY | LLM TTFT: {self.current_ttft}ms <<<")
             
+        elif isinstance(frame, TTSSpeakFrame):
+            text = frame.text
+            sess_id = self.get_session_id()
+            logger.info(f"Agent direct speak transcript: {text}")
+            asyncio.create_task(save_transcript(sess_id, "agent", text))
+            
+            # Broadcast direct speak transcript to client
+            if self.serializer.websocket:
+                try:
+                    await self.serializer.websocket.send_text(json.dumps({
+                        "type": "transcript",
+                        "speaker": "agent",
+                        "text": text
+                    }))
+                except Exception as e:
+                    logger.error(f"Error sending agent direct speak transcript: {e}")
+
         elif isinstance(frame, LLMFullResponseEndFrame):
             full_text = "".join(self.current_agent_response).strip()
             sess_id = self.get_session_id()
@@ -1120,10 +1189,10 @@ async def run_pipeline(websocket: WebSocket):
                 confidence=0.85,      # stricter confidence to filter out background speech
                 start_secs=0.35,      # require 350ms to verify it's actual speech
                 stop_secs=1.2,        # 1.2s of silence to stop (prevents cutting off half-words)
-                min_volume=0.40,      # reject background chatter/noise (0.40 is good for direct mouth-mic)
+                min_volume=0.25,      # reject background chatter/noise (0.25 is good for direct mouth-mic and normal voice)
             )
             vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=vad_params))
-            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.35, stop_secs=1.2, min_volume=0.40)")
+            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.35, stop_secs=1.2, min_volume=0.25)")
         except Exception as e:
             logger.warning(f"Could not instantiate Silero VAD: {e}")
             vad = None
