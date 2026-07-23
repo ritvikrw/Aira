@@ -13,7 +13,7 @@ import com.aira.mobile.domain.repository.AgentRepository
 import com.aira.mobile.presentation.home.HomeScreen
 import com.aira.mobile.presentation.permissions.PermissionsScreen
 import com.aira.mobile.presentation.config.AgentConfigScreen
-import com.aira.mobile.presentation.status.ConnectionStatusScreen
+import com.aira.mobile.presentation.analytics.AnalyticsScreen
 import com.aira.mobile.presentation.history.CallHistoryScreen
 import com.aira.mobile.presentation.fallback.FallbackSettingsScreen
 import dagger.hilt.android.AndroidEntryPoint
@@ -23,7 +23,7 @@ enum class AppScreen {
     Home,
     Permissions,
     Config,
-    Status,
+    Analytics,
     History,
     Fallback
 }
@@ -57,8 +57,8 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToConfig = {
                                     currentScreen = AppScreen.Config
                                 },
-                                onNavigateToStatus = {
-                                    currentScreen = AppScreen.Status
+                                onNavigateToAnalytics = {
+                                    currentScreen = AppScreen.Analytics
                                 },
                                 onNavigateToHistory = {
                                     currentScreen = AppScreen.History
@@ -83,8 +83,8 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
-                        AppScreen.Status -> {
-                            ConnectionStatusScreen(
+                        AppScreen.Analytics -> {
+                            AnalyticsScreen(
                                 agentRepository = agentRepository,
                                 onNavigateBack = {
                                     currentScreen = AppScreen.Home

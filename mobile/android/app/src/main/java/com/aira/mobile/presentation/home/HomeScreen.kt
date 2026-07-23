@@ -48,7 +48,7 @@ fun HomeScreen(
     agentRepository: AgentRepository,
     onNavigateToPermissions: () -> Unit,
     onNavigateToConfig: () -> Unit,
-    onNavigateToStatus: () -> Unit,
+    onNavigateToAnalytics: () -> Unit,
     onNavigateToHistory: () -> Unit,
     onNavigateToFallback: () -> Unit
 ) {
@@ -69,31 +69,10 @@ fun HomeScreen(
     val lastTotalTurnMs by remember { MyConnection.lastTotalTurnMs }
     val isCallActive by remember { MyConnection.isCallActive }
 
-    var showSimulationDialog by remember { mutableStateOf(false) }
-    // Simulation prompt is the same as Agent Config's custom_instructions — one source of truth
-    var simulationPrompt by remember {
-        mutableStateOf(sharedPreferences.getString("custom_instructions", "") ?: "")
-    }
-    var simulationBusinessName by remember {
-        mutableStateOf(sharedPreferences.getString("simulation_business_name", "Siddharth Biryani") ?: "Siddharth Biryani")
-    }
-    var simulationAgentName by remember {
-        mutableStateOf(sharedPreferences.getString("simulation_agent_name", "AIRA") ?: "AIRA")
-    }
-    
-    val serverUrl = remember { sharedPreferences.getString("server_url", "wss://web-ninaiv-production-c6ae.up.railway.app/ws") ?: "wss://web-ninaiv-production-c6ae.up.railway.app/ws" }
-    val httpUrl = remember(serverUrl) {
-        val scheme = if (serverUrl.startsWith("wss://")) "https://" else "http://"
-        val noScheme = serverUrl.substringAfter("://").substringBefore("/ws").substringBefore("/")
-        val host = noScheme.substringBefore(":")
-        val portStr = noScheme.substringAfter(":", "")
-        if (portStr.isNotEmpty()) {
-            val httpPort = if (portStr == "8000") "8001" else portStr
-            "$scheme$host:$httpPort"
-        } else {
-            "$scheme$host"
-        }
-    }
+    var showWarningBanner by remember { mutableStateOf(false) }
+    var showConfirmationCard by remember { mutableStateOf(false) }
+
+    val httpUrl = "https://web-ninaiv-production-c6ae.up.railway.app"
 
     // Refresh states periodically
     LaunchedEffect(Unit) {
@@ -194,6 +173,34 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // Validation Warning Banner
+                AnimatedVisibility(visible = showWarningBanner) {
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF9A9A)),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = "Warning",
+                                tint = Color(0xFFC62828)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Please fill in all the configuration details in Agent Config first",
+                                color = Color(0xFFC62828),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
                 // Central Status Bubble
                 Box(
                     contentAlignment = Alignment.Center,
@@ -328,11 +335,11 @@ fun HomeScreen(
                             }
                             Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("LLM", color = Color.Gray, fontSize = 10.sp)
-                                Text("Groq llama-3.1-8b", color = Color.White, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                Text("Google Gemini", color = Color.White, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
                             Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
                                 Text("TTS", color = Color.Gray, fontSize = 10.sp)
-                                Text("Cartesia Ramya", color = Color.White, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                                Text("Sarvam bulbul:v3", color = Color.White, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.End)
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
@@ -382,19 +389,19 @@ fun HomeScreen(
                             Icon(Icons.Default.Edit, contentDescription = null, tint = Color(0xFF8A9AFA))
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("Agent Config", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text("Edit prompt & name", color = Color.Gray, fontSize = 10.sp)
+                            Text("Edit prompt & info", color = Color.Gray, fontSize = 10.sp)
                         }
                     }
                     Card(
-                        modifier = Modifier.weight(1f).clickable { onNavigateToStatus() },
+                        modifier = Modifier.weight(1f).clickable { onNavigateToAnalytics() },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35))
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
-                            Icon(Icons.Default.Build, contentDescription = null, tint = Color(0xFF8A9AFA))
+                            Icon(Icons.Default.List, contentDescription = null, tint = Color(0xFF8A9AFA))
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Connection", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text("Test WS server port", color = Color.Gray, fontSize = 10.sp)
+                            Text("Analytics", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("View metrics & trends", color = Color.Gray, fontSize = 10.sp)
                         }
                     }
                 }
@@ -497,9 +504,74 @@ fun HomeScreen(
                     )
                 }
             } else {
+                // Friction Confirmation Card — shown above Simulate button when requested
+                AnimatedVisibility(visible = showConfirmationCard) {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF5A6BFA).copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Simulate Call Confirmation",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Are you sure you want to simulate an incoming call with current configurations?",
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                TextButton(
+                                    onClick = { showConfirmationCard = false },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Cancel", color = Color.Gray)
+                                }
+                                Button(
+                                    onClick = {
+                                        showConfirmationCard = false
+                                        telecomHelper.simulateIncomingCall(
+                                            callerName = "Test Caller (Simulation)",
+                                            callerNumber = "12345"
+                                        )
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5A6BFA)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1.5f)
+                                ) {
+                                    Text("Confirm", fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Simulate button — shown when no call is active
                 Button(
-                    onClick = { showSimulationDialog = true },
+                    onClick = {
+                        val bus = sharedPreferences.getString("business_name", "") ?: ""
+                        val ag = sharedPreferences.getString("agent_name", "") ?: ""
+                        val hrs = sharedPreferences.getString("business_hours", "") ?: ""
+                        val inst = sharedPreferences.getString("agent_instructions", "") ?: ""
+                        val avd = sharedPreferences.getString("topics_to_avoid", "") ?: ""
+
+                        if (bus.isBlank() || ag.isBlank() || hrs.isBlank() || inst.isBlank() || avd.isBlank()) {
+                            showWarningBanner = true
+                            showConfirmationCard = false
+                        } else {
+                            showWarningBanner = false
+                            showConfirmationCard = true
+                        }
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5A6BFA)),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
@@ -518,114 +590,6 @@ fun HomeScreen(
                     )
                 }
             }
-        }
-
-        // Simulation Dialog
-        if (showSimulationDialog) {
-            AlertDialog(
-                onDismissRequest = { showSimulationDialog = false },
-                title = {
-                    Text(
-                        text = "Simulate Incoming Call",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                },
-                text = {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = simulationBusinessName,
-                            onValueChange = { simulationBusinessName = it },
-                            label = { Text("Business Name") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF5A6BFA),
-                                unfocusedBorderColor = Color.Gray,
-                                focusedLabelColor = Color(0xFF8A9AFA),
-                                unfocusedLabelColor = Color.Gray
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-
-                        OutlinedTextField(
-                            value = simulationAgentName,
-                            onValueChange = { simulationAgentName = it },
-                            label = { Text("AI Name") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF5A6BFA),
-                                unfocusedBorderColor = Color.Gray,
-                                focusedLabelColor = Color(0xFF8A9AFA),
-                                unfocusedLabelColor = Color.Gray
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-
-                        Text(
-                            text = "Custom instructions for this call (same as Agent Config):",
-                            color = Color.LightGray,
-                            fontSize = 12.sp
-                        )
-                        OutlinedTextField(
-                            value = simulationPrompt,
-                            onValueChange = { simulationPrompt = it },
-                            label = { Text("Agent Instructions") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF5A6BFA),
-                                unfocusedBorderColor = Color.Gray,
-                                focusedLabelColor = Color(0xFF8A9AFA),
-                                unfocusedLabelColor = Color.Gray
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            maxLines = 6
-                        )
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            sharedPreferences.edit()
-                                .putString("custom_instructions", simulationPrompt)
-                                .putString("simulation_business_name", simulationBusinessName)
-                                .putString("simulation_agent_name", simulationAgentName)
-                                .apply()
-                            agentRepository.saveSettings(
-                                httpUrl,
-                                mapOf(
-                                    "custom_instructions" to simulationPrompt,
-                                    "org_name" to simulationBusinessName,
-                                    "agent_name" to simulationAgentName
-                                )
-                            ) { _ -> }
-                            telecomHelper.simulateIncomingCall(
-                                callerName = "Test Caller (Simulation)",
-                                callerNumber = "12345"
-                            )
-                            showSimulationDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5A6BFA))
-                    ) {
-                        Text("Start Call", fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showSimulationDialog = false }) {
-                        Text("Cancel", color = Color.Gray)
-                    }
-                },
-                containerColor = Color(0xFF1E1F35),
-                shape = RoundedCornerShape(20.dp)
-            )
         }
     }
 }

@@ -110,13 +110,11 @@ async def get_settings():
         return {
             "selected_voice_id": "cartesia:f039066f-cdb7-45ed-b51d-1034ae2f04a0",
             "default_language": "en-IN",
-            "agent_name": "AIRA",
-            "org_name": "AIRA Solutions",
-            "org_description": "We provide premium AI voice receptionist systems.",
-            "custom_instructions": "Be polite, helpful, and professional.",
-            "business_hours": "9 AM to 5 PM, Monday to Friday",
-            "human_escalation": "Transfer to our support line at +1-800-555-0199",
-            "topics_to_avoid": "Do not discuss legal advice or product pricing guarantees."
+            "agent_name": "Clara",
+            "business_name": "Aira Solutions",
+            "business_hours": "Monday to Friday, 9am to 6pm IST. Closed on weekends.",
+            "agent_instructions": "Answer user queries, explain service offerings, and take callback requests politely.",
+            "topics_to_avoid": "Competitor products, ongoing legal matters, internal pricing."
         }
     try:
         async with db_pool.acquire() as conn:
@@ -147,6 +145,93 @@ async def update_settings(settings: dict):
         return {"status": "success"}
     except Exception as e:
         logger.error("API failed to update settings: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_app.get("/analytics")
+async def get_analytics():
+    if not db_pool:
+        return {
+            "total_calls": 0,
+            "today_calls": 0,
+            "avg_duration": 0.0,
+            "busiest_hour": "N/A",
+            "active_calls": 0,
+            "volume_over_time": [],
+            "calls_by_category": {},
+            "top_topics": []
+        }
+    try:
+        async with db_pool.acquire() as conn:
+            calls_stats = await conn.fetchrow("""
+                SELECT 
+                    COUNT(*)::integer as total,
+                    COUNT(*) FILTER (WHERE call_start_time >= CURRENT_DATE AT TIME ZONE 'Asia/Kolkata')::integer as today
+                FROM call_logs
+            """)
+            total_calls = calls_stats['total'] if calls_stats else 0
+            today_calls = calls_stats['today'] if calls_stats else 0
+
+            avg_duration_row = await conn.fetchval("""
+                SELECT COALESCE(AVG(call_duration_seconds), 0) FROM call_logs
+            """)
+            avg_duration = float(avg_duration_row) if avg_duration_row else 0.0
+
+            busiest_hour_row = await conn.fetchrow("""
+                SELECT EXTRACT(HOUR FROM call_start_time AT TIME ZONE 'Asia/Kolkata')::integer AS hour, COUNT(*)::integer AS count
+                FROM call_logs
+                GROUP BY hour
+                ORDER BY count DESC, hour ASC
+                LIMIT 1
+            """)
+            if busiest_hour_row:
+                h = int(busiest_hour_row['hour'])
+                busiest_hour = f"{h:02d}:00"
+            else:
+                busiest_hour = "N/A"
+
+            active_calls_val = await conn.fetchval("""
+                SELECT COUNT(*)::integer FROM call_logs WHERE status = 'active'
+            """)
+            active_calls = active_calls_val if active_calls_val else 0
+
+            volume_rows = await conn.fetch("""
+                SELECT TO_CHAR(call_start_time AT TIME ZONE 'Asia/Kolkata', 'DD Mon') AS day_str, COUNT(*)::integer AS count
+                FROM call_logs
+                GROUP BY TO_CHAR(call_start_time AT TIME ZONE 'Asia/Kolkata', 'DD Mon'), DATE_TRUNC('day', call_start_time AT TIME ZONE 'Asia/Kolkata')
+                ORDER BY DATE_TRUNC('day', call_start_time AT TIME ZONE 'Asia/Kolkata') ASC
+                LIMIT 30
+            """)
+            volume_over_time = [{"label": r['day_str'], "value": r['count']} for r in volume_rows]
+
+            category_rows = await conn.fetch("""
+                SELECT call_category, COUNT(*)::integer AS count
+                FROM call_summaries
+                GROUP BY call_category
+                ORDER BY count DESC
+            """)
+            calls_by_category = {r['call_category']: r['count'] for r in category_rows}
+
+            topic_rows = await conn.fetch("""
+                SELECT UNNEST(key_topics) AS topic, COUNT(*)::integer AS count
+                FROM call_summaries
+                GROUP BY topic
+                ORDER BY count DESC
+                LIMIT 15
+            """)
+            top_topics = [{"topic": r['topic'], "count": r['count']} for r in topic_rows if r['topic']]
+
+            return {
+                "total_calls": total_calls,
+                "today_calls": today_calls,
+                "avg_duration": avg_duration,
+                "busiest_hour": busiest_hour,
+                "active_calls": active_calls,
+                "volume_over_time": volume_over_time,
+                "calls_by_category": calls_by_category,
+                "top_topics": top_topics
+            }
+    except Exception as e:
+        logger.error("API failed to get analytics: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_app.get("/calls")
@@ -298,13 +383,11 @@ async def init_db():
         defaults = {
             "selected_voice_id": "cartesia:f039066f-cdb7-45ed-b51d-1034ae2f04a0",
             "default_language": "en-IN",
-            "agent_name": "AIRA",
-            "org_name": "AIRA Solutions",
-            "org_description": "We provide premium AI voice receptionist systems.",
-            "custom_instructions": "Be polite, helpful, and professional.",
-            "business_hours": "9 AM to 5 PM, Monday to Friday",
-            "human_escalation": "Transfer to our support line at +1-800-555-0199",
-            "topics_to_avoid": "Do not discuss legal advice or product pricing guarantees."
+            "agent_name": "Clara",
+            "business_name": "Aira Solutions",
+            "business_hours": "Monday to Friday, 9am to 6pm IST. Closed on weekends.",
+            "agent_instructions": "Answer user queries, explain service offerings, and take callback requests politely.",
+            "topics_to_avoid": "Competitor products, ongoing legal matters, internal pricing."
         }
         for k, v in defaults.items():
             if k not in existing_keys:
@@ -662,14 +745,22 @@ class UserTranscriptInterceptor(FrameProcessor):
             if should_switch and detected and detected != self.current_language:
                 logger.info(f"Switching language from {self.current_language} to {detected}")
                 self.current_language = detected
-                # Rebuild and update LLM system instruction
-                system_prompt = build_prompt(
-                    agent_name=self.agent_name,
-                    org_name=self.org_name,
-                    language=detected,
-                    org_description=self.org_description,
-                    instructions=self.instructions
-                )
+                # Rebuild system instruction using structured format
+                system_prompt = f"""You are {self.agent_name}, an AI Phone Receptionist representing {getattr(self, 'business_name', 'Aira Solutions')}.
+
+[BUSINESS HOURS]:
+{getattr(self, 'business_hours', '')}
+
+[AGENT INSTRUCTIONS - HOW YOU SHOULD SPEAK]:
+{getattr(self, 'agent_instructions', '')}
+
+[TOPICS TO AVOID]:
+{getattr(self, 'topics_to_avoid', '')}"""
+
+                from prompts.loader import _LANGUAGE_MODULES, en_IN
+                lang_module = _LANGUAGE_MODULES.get(detected, en_IN)
+                lang_prompt = lang_module.PROMPT.replace("{agent_name}", self.agent_name).replace("{org_name}", getattr(self, 'business_name', 'Aira Solutions'))
+                system_prompt = f"{system_prompt}\n\n{lang_prompt}"
                 self.current_system_prompt = system_prompt
                 self.llm._settings.system_instruction = system_prompt
                 
@@ -1099,7 +1190,7 @@ async def run_pipeline(websocket: WebSocket):
         
         is_simulation = websocket_conn.query_params.get("is_simulation", "false").lower() == "true"
         simulation_prompt = websocket_conn.query_params.get("simulation_prompt", "")
-        business_name = websocket_conn.query_params.get("business_name", "")
+        business_name_param = websocket_conn.query_params.get("business_name", "")
         agent_name_param = websocket_conn.query_params.get("agent_name", "")
         
         # Register call in database
@@ -1107,36 +1198,35 @@ async def run_pipeline(websocket: WebSocket):
         
         # Fetch settings from API
         settings = await fetch_settings()
-        agent_name = agent_name_param.strip() if agent_name_param.strip() else settings.get("agent_name", "AIRA")
-        org_name = business_name.strip() if business_name.strip() else settings.get("org_name", "")
-        org_description = settings.get("org_description", "")
+        agent_name = agent_name_param.strip() if agent_name_param.strip() else settings.get("agent_name", "Clara")
+        business_name_val = business_name_param.strip() if business_name_param.strip() else settings.get("business_name", "Aira Solutions")
+        business_hours = settings.get("business_hours", "Monday to Friday, 9am to 6pm IST. Closed on weekends.")
+        agent_instructions = settings.get("agent_instructions", "Answer user queries, explain service offerings, and take callback requests politely.")
+        topics_to_avoid = settings.get("topics_to_avoid", "Competitor products, ongoing legal matters, internal pricing.")
         default_language = settings.get("default_language", "en-IN")
         
-        # Build prompt instructions
-        instruction_parts = []
-        if settings.get("business_hours"):
-            instruction_parts.append(f"Business hours: {settings['business_hours']}")
-        if settings.get("human_escalation"):
-            instruction_parts.append(f"When caller asks for a human: {settings['human_escalation']}")
-        if settings.get("topics_to_avoid"):
-            instruction_parts.append(f"Do not discuss: {settings['topics_to_avoid']}")
-        if settings.get("custom_instructions"):
-            instruction_parts.append(settings["custom_instructions"])
-            
+        # If in simulation mode, append simulation custom instructions
         if is_simulation and simulation_prompt:
             logger.info("Simulation call detected. Appending simulation custom instructions: %s", simulation_prompt)
-            instruction_parts.append(f"\n[CRITICAL SIMULATION SCENARIO / CUSTOM ROLEPLAY INSTRUCTION]:\n{simulation_prompt}")
+            agent_instructions += f"\n\n[CRITICAL SIMULATION SCENARIO / CUSTOM ROLEPLAY INSTRUCTION]:\n{simulation_prompt}"
             
-        instructions = "\n".join(instruction_parts)
-        
-        # Build system prompt using prompts loader
-        system_prompt = build_prompt(
-            agent_name=agent_name,
-            org_name=org_name,
-            language=default_language,
-            org_description=org_description,
-            instructions=instructions
-        )
+        # Build system prompt using structured format
+        system_prompt = f"""You are {agent_name}, an AI Phone Receptionist representing {business_name_val}.
+
+[BUSINESS HOURS]:
+{business_hours}
+
+[AGENT INSTRUCTIONS - HOW YOU SHOULD SPEAK]:
+{agent_instructions}
+
+[TOPICS TO AVOID]:
+{topics_to_avoid}"""
+
+        # Append localized instructions from prompts pack
+        from prompts.loader import _LANGUAGE_MODULES, en_IN
+        lang_module = _LANGUAGE_MODULES.get(default_language, en_IN)
+        lang_prompt = lang_module.PROMPT.replace("{agent_name}", agent_name).replace("{org_name}", business_name_val)
+        system_prompt = f"{system_prompt}\n\n{lang_prompt}"
         
         # Set LLM context with system prompt — mutate list in-place to survive property quirks
         try:
@@ -1152,9 +1242,10 @@ async def run_pipeline(websocket: WebSocket):
         
         # Update interceptor settings
         user_interceptor.agent_name = agent_name
-        user_interceptor.org_name = org_name
-        user_interceptor.org_description = org_description
-        user_interceptor.instructions = instructions
+        user_interceptor.business_name = business_name_val
+        user_interceptor.business_hours = business_hours
+        user_interceptor.agent_instructions = agent_instructions
+        user_interceptor.topics_to_avoid = topics_to_avoid
         user_interceptor.current_system_prompt = system_prompt
         user_interceptor.current_language = default_language
         user_interceptor.language_locked = True
@@ -1163,26 +1254,30 @@ async def run_pipeline(websocket: WebSocket):
         # Register mid-call prompt refresh callback for this session
         async def _refresh_prompt(new_settings: dict):
             ns_agent = new_settings.get("agent_name", agent_name)
-            ns_org = new_settings.get("org_name", org_name)
-            ns_desc = new_settings.get("org_description", org_description)
-            parts = []
-            if new_settings.get("business_hours"):
-                parts.append(f"Business hours: {new_settings['business_hours']}")
-            if new_settings.get("human_escalation"):
-                parts.append(f"When caller asks for a human: {new_settings['human_escalation']}")
-            if new_settings.get("topics_to_avoid"):
-                parts.append(f"Do not discuss: {new_settings['topics_to_avoid']}")
-            if new_settings.get("custom_instructions"):
-                parts.append(new_settings["custom_instructions"])
+            ns_business = new_settings.get("business_name", business_name_val)
+            ns_hours = new_settings.get("business_hours", business_hours)
+            ns_instructions = new_settings.get("agent_instructions", agent_instructions)
+            ns_avoid = new_settings.get("topics_to_avoid", topics_to_avoid)
+            
             if is_simulation and simulation_prompt:
-                parts.append(f"\n[CRITICAL SIMULATION SCENARIO / CUSTOM ROLEPLAY INSTRUCTION]:\n{simulation_prompt}")
-            new_prompt = build_prompt(
-                agent_name=ns_agent,
-                org_name=ns_org,
-                language=user_interceptor.current_language,
-                org_description=ns_desc,
-                instructions="\n".join(parts)
-            )
+                ns_instructions += f"\n\n[CRITICAL SIMULATION SCENARIO / CUSTOM ROLEPLAY INSTRUCTION]:\n{simulation_prompt}"
+                
+            new_prompt = f"""You are {ns_agent}, an AI Phone Receptionist representing {ns_business}.
+
+[BUSINESS HOURS]:
+{ns_hours}
+
+[AGENT INSTRUCTIONS - HOW YOU SHOULD SPEAK]:
+{ns_instructions}
+
+[TOPICS TO AVOID]:
+{ns_avoid}"""
+
+            from prompts.loader import _LANGUAGE_MODULES, en_IN
+            lang_module = _LANGUAGE_MODULES.get(user_interceptor.current_language, en_IN)
+            lang_prompt = lang_module.PROMPT.replace("{agent_name}", ns_agent).replace("{org_name}", ns_business)
+            new_prompt = f"{new_prompt}\n\n{lang_prompt}"
+            
             user_interceptor.current_system_prompt = new_prompt
             llm._settings.system_instruction = new_prompt
             updated = False
@@ -1198,7 +1293,7 @@ async def run_pipeline(websocket: WebSocket):
         _session_prompt_updaters[session_id] = _refresh_prompt
 
         # Play predefined English greeting first so LLM starts call naturally
-        greeting = f"Hi, I am {agent_name} from {org_name}. Which language do you want to speak?"
+        greeting = f"Hi, I am {agent_name} from {business_name_val}. Which language do you want to speak?"
         await task.queue_frames([TTSSpeakFrame(text=greeting, append_to_context=True)])
 
     @transport.event_handler("on_client_disconnected")

@@ -53,19 +53,7 @@ fun CallHistoryScreen(
     val sharedPreferences = remember { context.getSharedPreferences("aira_prefs", Context.MODE_PRIVATE) }
     val scope = rememberCoroutineScope()
 
-    val serverUrl = remember { sharedPreferences.getString("server_url", "wss://web-ninaiv-production-c6ae.up.railway.app/ws") ?: "wss://web-ninaiv-production-c6ae.up.railway.app/ws" }
-    val httpUrl = remember(serverUrl) {
-        val scheme = if (serverUrl.startsWith("wss://")) "https://" else "http://"
-        val noScheme = serverUrl.substringAfter("://").substringBefore("/ws").substringBefore("/")
-        val host = noScheme.substringBefore(":")
-        val portStr = noScheme.substringAfter(":", "")
-        if (portStr.isNotEmpty()) {
-            val httpPort = if (portStr == "8000") "8001" else portStr
-            "$scheme$host:$httpPort"
-        } else {
-            "$scheme$host"
-        }
-    }
+    val httpUrl = "https://web-ninaiv-production-c6ae.up.railway.app"
 
     // Load call logs: merge server + local SQLite, dedup by sessionId
     LaunchedEffect(Unit) {

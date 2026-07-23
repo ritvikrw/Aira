@@ -133,4 +133,32 @@ class AgentApiService @Inject constructor(
             }
         })
     }
+
+    fun fetchAnalytics(baseUrl: String, callback: (JSONObject?) -> Unit) {
+        val request = Request.Builder()
+            .url("$baseUrl/analytics")
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                callback(null)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!response.isSuccessful) {
+                        callback(null)
+                        return
+                    }
+                    try {
+                        val bodyString = response.body?.string() ?: "{}"
+                        val json = JSONObject(bodyString)
+                        callback(json)
+                    } catch (e: Exception) {
+                        callback(null)
+                    }
+                }
+            }
+        })
+    }
 }

@@ -39,4 +39,8 @@ class AgentRepositoryImpl @Inject constructor(
     override fun fetchCallHistory(baseUrl: String, callback: (JSONArray?) -> Unit) {
         apiService.fetchCallHistory(baseUrl, callback)
     }
+
+    override fun fetchAnalytics(baseUrl: String, callback: (org.json.JSONObject?) -> Unit) {
+        apiService.fetchAnalytics(baseUrl, callback)
+    }
 }

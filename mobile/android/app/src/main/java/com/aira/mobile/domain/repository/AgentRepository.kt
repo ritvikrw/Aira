@@ -11,4 +11,5 @@ interface AgentRepository {
     fun fetchSettings(baseUrl: String, callback: (Map<String, String>?) -> Unit)
     fun saveSettings(baseUrl: String, settings: Map<String, String>, callback: (Boolean) -> Unit)
     fun fetchCallHistory(baseUrl: String, callback: (JSONArray?) -> Unit)
+    fun fetchAnalytics(baseUrl: String, callback: (org.json.JSONObject?) -> Unit)
 }

@@ -193,7 +193,7 @@ class MyConnection(private val context: Context) : Connection() {
         }
 
         val sharedPreferences = context.getSharedPreferences("aira_prefs", Context.MODE_PRIVATE)
-        val serverUrl = sharedPreferences.getString("server_url", "wss://web-ninaiv-production-c6ae.up.railway.app/ws") ?: "wss://web-ninaiv-production-c6ae.up.railway.app/ws"
+        val serverUrl = "wss://web-ninaiv-production-c6ae.up.railway.app/ws"
         val callerNum = address?.schemeSpecificPart ?: "Unknown"
 
         if (callerNum == "5550199" || serverUrl.trim().lowercase() == "echo" || serverUrl.trim().lowercase() == "ws://echo") {
@@ -203,9 +203,9 @@ class MyConnection(private val context: Context) : Connection() {
         }
 
         val isSim = isSimulation || callerNum == "12345"
-        val simulationPrompt = sharedPreferences.getString("custom_instructions", "") ?: ""
-        val businessName = sharedPreferences.getString("simulation_business_name", "Siddharth Biryani") ?: "Siddharth Biryani"
-        val agentName = sharedPreferences.getString("simulation_agent_name", "AIRA") ?: "AIRA"
+        val simulationPrompt = sharedPreferences.getString("agent_instructions", "") ?: ""
+        val businessName = sharedPreferences.getString("business_name", "Aira Solutions") ?: "Aira Solutions"
+        val agentName = sharedPreferences.getString("agent_name", "Clara") ?: "Clara"
         val cleanNumber = callerNum.replace(Regex("[^0-9+]"), "")
         var wsUrl = if (serverUrl.contains("?")) {
             "$serverUrl&session_id=$sessionId&caller_phone=$cleanNumber"

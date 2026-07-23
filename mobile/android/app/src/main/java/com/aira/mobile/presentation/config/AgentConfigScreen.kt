@@ -32,16 +32,20 @@ fun AgentConfigScreen(
     val context = LocalContext.current
     val sharedPreferences = remember { context.getSharedPreferences("aira_prefs", Context.MODE_PRIVATE) }
 
-    var agentName by remember {
-        mutableStateOf(sharedPreferences.getString("agent_name", "AIRA") ?: "AIRA")
+    var businessName by remember {
+        mutableStateOf(sharedPreferences.getString("business_name", "Aira Solutions") ?: "Aira Solutions")
     }
-    var systemPrompt by remember {
-        mutableStateOf(
-            sharedPreferences.getString(
-                "system_prompt",
-                "You are AIRA, a prompt-based phone voice receptionist agent."
-            ) ?: "You are AIRA, a prompt-based phone voice receptionist agent."
-        )
+    var agentName by remember {
+        mutableStateOf(sharedPreferences.getString("agent_name", "Clara") ?: "Clara")
+    }
+    var businessHours by remember {
+        mutableStateOf(sharedPreferences.getString("business_hours", "Monday to Friday, 9am to 6pm IST. Closed on weekends.") ?: "Monday to Friday, 9am to 6pm IST. Closed on weekends.")
+    }
+    var agentInstructions by remember {
+        mutableStateOf(sharedPreferences.getString("agent_instructions", "Answer user queries, explain service offerings, and take callback requests politely.") ?: "Answer user queries, explain service offerings, and take callback requests politely.")
+    }
+    var topicsToAvoid by remember {
+        mutableStateOf(sharedPreferences.getString("topics_to_avoid", "Competitor products, ongoing legal matters, internal pricing.") ?: "Competitor products, ongoing legal matters, internal pricing.")
     }
     var defaultLanguage by remember {
         mutableStateOf(sharedPreferences.getString("default_language", "en-IN") ?: "en-IN")
@@ -50,25 +54,16 @@ fun AgentConfigScreen(
         mutableStateOf(sharedPreferences.getBoolean("agent_enabled", false))
     }
 
-    val serverUrl = remember { sharedPreferences.getString("server_url", "wss://web-ninaiv-production-c6ae.up.railway.app/ws") ?: "wss://web-ninaiv-production-c6ae.up.railway.app/ws" }
-    val httpUrl = remember(serverUrl) {
-        val scheme = if (serverUrl.startsWith("wss://")) "https://" else "http://"
-        val noScheme = serverUrl.substringAfter("://").substringBefore("/ws").substringBefore("/")
-        val host = noScheme.substringBefore(":")
-        val portStr = noScheme.substringAfter(":", "")
-        if (portStr.isNotEmpty()) {
-            val httpPort = if (portStr == "8000") "8001" else portStr
-            "$scheme$host:$httpPort"
-        } else {
-            "$scheme$host"
-        }
-    }
+    val httpUrl = "https://web-ninaiv-production-c6ae.up.railway.app"
 
     LaunchedEffect(Unit) {
         agentRepository.fetchSettings(httpUrl) { map ->
             if (map != null) {
+                map["business_name"]?.let { businessName = it }
                 map["agent_name"]?.let { agentName = it }
-                map["custom_instructions"]?.let { systemPrompt = it }
+                map["business_hours"]?.let { businessHours = it }
+                map["agent_instructions"]?.let { agentInstructions = it }
+                map["topics_to_avoid"]?.let { topicsToAvoid = it }
                 map["default_language"]?.let { defaultLanguage = it }
                 map["agent_enabled"]?.let {
                     val enabled = it == "true"
@@ -140,7 +135,7 @@ fun AgentConfigScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Customize agent personality and language",
+                            text = "Customize agent personality and details",
                             color = Color.Gray,
                             fontSize = 12.sp
                         )
@@ -149,7 +144,7 @@ fun AgentConfigScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                // Name Card
+                // Business Name Card
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35)),
@@ -157,7 +152,38 @@ fun AgentConfigScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Agent Display Name",
+                            text = "Business Name",
+                            color = Color(0xFF8A9AFA),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = businessName,
+                            onValueChange = { businessName = it },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF5A6BFA),
+                                unfocusedBorderColor = Color(0xFF2C2D4A),
+                                focusedContainerColor = Color(0xFF12131C),
+                                unfocusedContainerColor = Color(0xFF12131C)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                // AI Name Card
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35)),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "AI / Agent Name",
                             color = Color(0xFF8A9AFA),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
@@ -180,7 +206,7 @@ fun AgentConfigScreen(
                     }
                 }
 
-                // Prompt Card
+                // Business Hours Card
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35)),
@@ -188,17 +214,81 @@ fun AgentConfigScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "System Prompt / Instructions",
+                            text = "Business Hours",
                             color = Color(0xFF8A9AFA),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
-                            value = systemPrompt,
-                            onValueChange = { systemPrompt = it },
-                            minLines = 4,
-                            maxLines = 8,
+                            value = businessHours,
+                            onValueChange = { businessHours = it },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF5A6BFA),
+                                unfocusedBorderColor = Color(0xFF2C2D4A),
+                                focusedContainerColor = Color(0xFF12131C),
+                                unfocusedContainerColor = Color(0xFF12131C)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                // Agent Instructions Card
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35)),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Agent Instructions",
+                            color = Color(0xFF8A9AFA),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = agentInstructions,
+                            onValueChange = { agentInstructions = it },
+                            minLines = 3,
+                            maxLines = 6,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF5A6BFA),
+                                unfocusedBorderColor = Color(0xFF2C2D4A),
+                                focusedContainerColor = Color(0xFF12131C),
+                                unfocusedContainerColor = Color(0xFF12131C)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                // Topics to Avoid Card
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F35)),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Topics to Avoid",
+                            color = Color(0xFF8A9AFA),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = topicsToAvoid,
+                            onValueChange = { topicsToAvoid = it },
+                            minLines = 2,
+                            maxLines = 4,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
@@ -253,7 +343,6 @@ fun AgentConfigScreen(
                                     .fillMaxWidth()
                                     .clickable { dropdownExpanded = true }
                             )
-                            // Invisible overlay to trigger dropdown
                             Box(
                                 modifier = Modifier
                                     .matchParentSize()
@@ -288,15 +377,21 @@ fun AgentConfigScreen(
             Button(
                 onClick = {
                     sharedPreferences.edit().apply {
+                        putString("business_name", businessName)
                         putString("agent_name", agentName)
-                        putString("system_prompt", systemPrompt)
+                        putString("business_hours", businessHours)
+                        putString("agent_instructions", agentInstructions)
+                        putString("topics_to_avoid", topicsToAvoid)
                         putString("default_language", defaultLanguage)
                         apply()
                     }
                     
                     val settingsMap = mapOf(
+                        "business_name" to businessName,
                         "agent_name" to agentName,
-                        "custom_instructions" to systemPrompt,
+                        "business_hours" to businessHours,
+                        "agent_instructions" to agentInstructions,
+                        "topics_to_avoid" to topicsToAvoid,
                         "default_language" to defaultLanguage,
                         "agent_enabled" to agentEnabled.toString()
                     )
