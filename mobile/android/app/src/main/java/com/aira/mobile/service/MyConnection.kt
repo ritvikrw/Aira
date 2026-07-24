@@ -49,6 +49,8 @@ class MyConnection(private val context: Context) : Connection() {
 
     private var isRunning = false
     private var isCallActive = false
+    @Volatile
+    private var isConnecting = false
     private var reconnectAttempts = 0
     private val maxReconnectAttempts = 3
     private var audioRecord: AudioRecord? = null
@@ -187,8 +189,8 @@ class MyConnection(private val context: Context) : Connection() {
     @Synchronized
     private fun connectToWebSocket() {
         shouldPlayAudio = true
-        if (webSocket != null) {
-            Log.w(TAG, "connectToWebSocket: WebSocket connection already active")
+        if (webSocket != null || isConnecting) {
+            Log.w(TAG, "connectToWebSocket: WebSocket connection already active or connecting")
             return
         }
         if (!isCallActive) {
@@ -235,6 +237,7 @@ class MyConnection(private val context: Context) : Connection() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "WebSocket Connected successfully to Pipecat Backend")
                 reconnectAttempts = 0
+                isConnecting = false
                 this@MyConnection.webSocket = webSocket
                 if (!isRunning) {
                     startAudioLoop(webSocket)
@@ -296,8 +299,16 @@ class MyConnection(private val context: Context) : Connection() {
                 }
             }
 
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Log.i(TAG, "WebSocket closed: $reason")
+                isConnecting = false
+                this@MyConnection.webSocket = null
+            }
+
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WebSocket connection failure: ${t.message}", t)
+                isConnecting = false
+                this@MyConnection.webSocket = null
                 
                 dbHelper.insertTranscript(
                     TranscriptEntity(
@@ -666,6 +677,7 @@ class MyConnection(private val context: Context) : Connection() {
     private fun cleanup() {
         isRunning = false
         isCallActive = false
+        isConnecting = false
         Companion.isCallActive.value = false
         activeConnection = null
         micVolume.value = 0f

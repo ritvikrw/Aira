@@ -212,4 +212,27 @@ class CallDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         cursor.close()
         return list
     }
+
+    // Sync transcripts from server (which contain both original and English translation) into local SQLite
+    fun syncTranscripts(sessionId: String, transcripts: List<TranscriptEntity>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete(TABLE_TRANSCRIPTS, "$COL_TRANS_SESSION_ID = ?", arrayOf(sessionId))
+            for (t in transcripts) {
+                val values = ContentValues().apply {
+                    put(COL_TRANS_SESSION_ID, t.sessionId)
+                    put(COL_TRANS_SPEAKER, t.speaker)
+                    put(COL_TRANS_MESSAGE, t.message)
+                    put(COL_TRANS_TIMESTAMP, t.timestamp)
+                }
+                db.insert(TABLE_TRANSCRIPTS, null, values)
+            }
+            db.setTransactionSuccessful()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to sync transcripts for session $sessionId: ${e.message}", e)
+        } finally {
+            db.endTransaction()
+        }
+    }
 }

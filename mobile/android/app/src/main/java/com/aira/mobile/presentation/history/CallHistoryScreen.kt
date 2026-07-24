@@ -168,11 +168,19 @@ fun CallHistoryScreen(
                                 val list = mutableListOf<TranscriptEntity>()
                                 for (i in 0 until jsonArr.length()) {
                                     val obj = jsonArr.getJSONObject(i)
+                                    val original = obj.optString("message")
+                                    val english = obj.optString("message_en")
+                                    
+                                    val formattedMessage = if (english.isNotEmpty() && !english.equals(original, ignoreCase = true)) {
+                                        "$original\n\n(English: $english)"
+                                    } else {
+                                        original
+                                    }
                                     list.add(
                                         TranscriptEntity(
                                             sessionId = log.sessionId,
                                             speaker = obj.optString("speaker"),
-                                            message = obj.optString("message"),
+                                            message = formattedMessage,
                                             timestamp = System.currentTimeMillis()
                                         )
                                     )
@@ -183,6 +191,9 @@ fun CallHistoryScreen(
                                         showTranscriptDialog = true
                                     }
                                 } else {
+                                    scope.launch(Dispatchers.IO) {
+                                        dbHelper.syncTranscripts(log.sessionId, list)
+                                    }
                                     transcriptsForSelectedLog = list
                                     showTranscriptDialog = true
                                 }

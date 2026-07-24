@@ -14,6 +14,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from contextlib import asynccontextmanager
 
 # Reconfigure stdout/stderr for Unicode compatibility
 if sys.platform == "win32":
@@ -44,7 +45,8 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     TTSSpeakFrame,
     InterruptionFrame,
-    ErrorFrame
+    ErrorFrame,
+    UserStartedSpeakingFrame
 )
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
@@ -93,8 +95,29 @@ db_pool = None
 # Registry of active session prompt-refresh callbacks: session_id → async callable
 _session_prompt_updaters: dict = {}
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    await init_db()
+    await _resolve_cartesia_voice()
+    global db_pool
+    # Redact password for logging
+    safe_url = re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", DATABASE_URL or "")
+    logger.info("Attempting DB pool connection to: %s", safe_url[:120])
+    try:
+        db_pool = await asyncpg.create_pool(DATABASE_URL, statement_cache_size=0, min_size=1, max_size=5)
+        logger.info("PostgreSQL database pool initialized successfully")
+    except Exception as e:
+        logger.error("!! DB POOL FAILED !! %s: %s", type(e).__name__, e)
+        logger.warning("Running DATABASE-LESS. Transcripts, calls, and settings WILL NOT persist. Check DATABASE_URL_AIRA env var on Railway and that Supabase project is not paused.")
+    yield
+    # Shutdown logic
+    if db_pool:
+        await db_pool.close()
+        logger.info("PostgreSQL database pool closed successfully")
+
 # Initialize FastAPI app for HTTP endpoints
-api_app = FastAPI(title="AIRA Mobile API")
+api_app = FastAPI(title="AIRA Mobile API", lifespan=lifespan)
 api_app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -446,40 +469,16 @@ async def persist_caller_name(session_id: str, name: str) -> None:
     except Exception as e:
         logger.warning("Failed to save caller name in DB: %s", e)
 
-async def translate_to_english(text: str) -> str:
-    # If text is empty or already pure ASCII/English, return as-is
-    if not text or all(ord(c) < 128 for c in text):
-        return text
-    api_key = os.getenv("GOOGLE_API_KEY_AIRA", "") or os.getenv("GEMINI_API_KEY_AIRA", "") or os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
-        return text
-    try:
-        from google import genai
-        client = genai.Client(api_key=api_key)
-        gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=gemini_model,
-            contents=f"Translate the following text to English. Respond ONLY with the direct translation, do not add quotes, notes or markdown:\n\n{text}"
-        )
-        translated = response.text.strip() if response.text else ""
-        return translated if translated else text
-    except Exception as e:
-        logger.warning(f"Failed to translate transcript: {e}")
-        return text
-
 async def save_transcript(session_id: str, speaker: str, message: str) -> None:
     if not db_pool:
         logger.warning("DB offline - cannot save transcript for session: %s (speaker=%s)", session_id, speaker)
         return
     try:
-        # Translate to English asynchronously
-        message_en = await translate_to_english(message)
         async with db_pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO transcripts (session_id, speaker, message, message_en)
-                VALUES ($1, $2, $3, $4)
-            """, session_id, speaker, message, message_en)
+                VALUES ($1, $2, $3, NULL)
+            """, session_id, speaker, message)
     except Exception as e:
         logger.warning("Failed to save transcript in DB: %s", e)
 
@@ -512,13 +511,96 @@ class CallSummarySchema(BaseModel):
     action_items: list[str] = Field(description="Any follow-ups needed (empty list if none)")
     action_needed: str | None = Field(default=None, description="A single prominent action statement for the team/owner if the caller requested a callback, follow-up, demo scheduling, or assistance. Otherwise must be set to null or an empty string.")
 
-async def summarize_call_in_db(session_id: str):
+async def batch_translate_transcripts(session_id: str):
+    if not db_pool:
+        return
+    api_key = os.getenv("GOOGLE_API_KEY_AIRA", "") or os.getenv("GEMINI_API_KEY_AIRA", "") or os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        return
     try:
         async with db_pool.acquire() as conn:
-            rows = await conn.fetch("SELECT speaker, message FROM transcripts WHERE session_id = $1 ORDER BY id", session_id)
+            rows = await conn.fetch("""
+                SELECT id, speaker, message 
+                FROM transcripts 
+                WHERE session_id = $1 AND message_en IS NULL
+                ORDER BY id
+            """, session_id)
             if not rows:
                 return
-            dialog = "\n".join([f"{r['speaker'].upper()}: {r['message']}" for r in rows])
+
+            to_translate = []
+            for r in rows:
+                msg = r['message']
+                if msg and any(ord(c) >= 128 for c in msg):
+                    to_translate.append(r)
+            
+            if not to_translate:
+                await conn.execute("""
+                    UPDATE transcripts 
+                    SET message_en = message 
+                    WHERE session_id = $1 AND message_en IS NULL
+                """, session_id)
+                return
+
+            lines = [f"{r['id']}: {r['message']}" for r in to_translate]
+            prompt = f"""You are a precise translator. Translate each numbered line from the Indian regional language to English.
+Rules:
+- Retain the exact number prefix (e.g. "123:") for each line.
+- Translate the text accurately, maintaining conversational tone.
+- Do not add any introduction, explanations, quotes, or formatting.
+- Respond in the format:
+id: translation
+
+Lines:
+""" + "\n".join(lines)
+
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=gemini_model,
+                contents=prompt
+            )
+            
+            resp_text = response.text
+            if not resp_text:
+                return
+                
+            translations = {}
+            for line in resp_text.strip().split("\n"):
+                if ":" in line:
+                    parts = line.split(":", 1)
+                    try:
+                        line_id = int(parts[0].strip())
+                        trans_val = parts[1].strip()
+                        translations[line_id] = trans_val
+                    except Exception:
+                        pass
+            
+            for r in rows:
+                tid = r['id']
+                orig_message = r['message']
+                trans_msg = translations.get(tid, orig_message)
+                await conn.execute("UPDATE transcripts SET message_en = $1 WHERE id = $2", trans_msg, tid)
+                
+            await conn.execute("""
+                UPDATE transcripts 
+                SET message_en = message 
+                WHERE session_id = $1 AND message_en IS NULL
+            """, session_id)
+            logger.info(f"Batch translated transcripts for session: {session_id}")
+    except Exception as e:
+        logger.warning(f"Batch translation failed: {e}")
+
+async def summarize_call_in_db(session_id: str):
+    try:
+        await batch_translate_transcripts(session_id)
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch("SELECT speaker, message, message_en FROM transcripts WHERE session_id = $1 ORDER BY id", session_id)
+            if not rows:
+                return
+            dialog = "\n".join([f"{r['speaker'].upper()}: {r['message_en'] or r['message']}" for r in rows])
             
             # Fetch business name dynamically for the summarization prompt
             business_name = "Company"
@@ -597,11 +679,12 @@ Transcript:
         logger.error("Failed to generate/save call summary: %s", e)
 
 _USER_NAME_RE = re.compile(
-    r"my name(?:'s| is)\s+([A-Za-z][a-z]+(?:\s+[A-Za-z][a-z]+)?)",
+    r"(?:my name(?:'s| is)|నా (?:పేరు|name|నేమ్)|मेरा (?:नाम|name|नेम)|என் (?:பெயர்|name|நேம்)|ನನ್ನ (?:ಹೆಸರು|name)|എന്റെ (?:പേര്|name))\s+([\wऀ-ॿ\u0c00-\u0c7f\u0b80-\u0bff\u0d00-\u0d7f\u0a80-\u0abf\u0b00-\u0b7f]+(?:\s+[\wऀ-ॿ\u0c00-\u0c7f\u0b80-\u0bff\u0d00-\u0d7f\u0a80-\u0abf\u0b00-\u0b7f]+)?)",
     re.IGNORECASE,
 )
 _AGENT_NAME_RE = re.compile(
-    r"(?:thank(?:s| you)|got it|noted|great)[,!]?\s+([\wऀ-ॿ\u0c00-\u0c7f\u0b80-\u0bff\u0d00-\u0d7f\u0a80-\u0abf\u0b00-\u0b7f]+(?:\s+[\wऀ-ॿ\u0c00-\u0c7f\u0b80-\u0bff\u0d00-\u0d7f\u0a80-\u0abf\u0b00-\u0b7f]+)?)[!,.]",
+    r"(?:thank(?:s| you)|got it|noted|great|ధన్యవాదాలు|ధన్యవాదములు|धन्यवाद|நன்றி|ಧನ್ಯವಾದಗಳು|നന്ദി|ধন্যবাদ|నమస్తే|నమస్కారం)[,!]?\s+([\wऀ-ॿ\u0c00-\u0c7f\u0b80-\u0bff\u0d00-\u0d7f\u0a80-\u0abf\u0b00-\u0b7f]+(?:\s+[\wऀ-ॿ\u0c00-\u0c7f\u0b80-\u0bff\u0d00-\u0d7f\u0a80-\u0abf\u0b00-\u0b7f]+)?)[!,.]",
+    re.IGNORECASE,
 )
 _AGENT_ECHO_NAME_RE = re.compile(
     r"^([\wऀ-ॿ\u0c00-\u0c7f\u0b80-\u0bff\u0d00-\u0d7f\u0a80-\u0abf\u0b00-\u0b7f]{2,20})[,!]\s*(?:ok|sure|noted|got it|ஓகே|சரி)",
@@ -728,7 +811,7 @@ class UserTranscriptInterceptor(FrameProcessor):
         self.org_description = ""
         self.instructions = ""
         self.current_system_prompt = ""
-        self.caller_name_saved = False
+        self.caller_name = ""
         self.language_locked = True
         self.current_language = "en-IN"
         self.user_is_speaking = False
@@ -758,24 +841,33 @@ class UserTranscriptInterceptor(FrameProcessor):
                 logger.info(f"Dropping empty or punctuation-only transcript: {text!r}")
                 return
 
-            # Filler-Word Filter (All Regional Languages)
+            # Filler-Word and Grammatical Fragment Filter (All Languages)
             normalized_text = clean_text.lower().rstrip(".,?!")
             fillers = {
-                "హా", "హ", "हाँ", "हा", "ह", "হ্যাঁ", "হা", "হ", "ஆ", "ആ"
+                # Noise/sound fillers (various scripts)
+                "హా", "హ", "हाँ", "हा", "ह", "হ্যাঁ", "হা", "হ", "ஆ", "ஆ", "ഹാ", "ഹ", "ಹಾ", "ಹ",
+                # Telugu incomplete grammatical fragments / pronoun fillers
+                "నాకు", "మన", "మన యొక్క", "నేను", "నా", "మరియు", "కాని", "కానీ", "లేదా", "ఆ", "ఈ", "అది", "ఇది",
+                # Hindi incomplete grammatical fragments / pronoun fillers
+                "मुझे", "मेरा", "मैं", "हम", "हमारा", "और", "लेकिन", "या", "का", "की", "के", "यह", "वह", "तो", "है",
+                # Tamil incomplete grammatical fragments / pronoun fillers
+                "எனக்கு", "நான்", "என்", "எனது", "நமது", "எங்கள்", "மற்றும்", "ஆனால்", "அல்லது", "அது", "இது",
+                # Kannada incomplete grammatical fragments / pronoun fillers
+                "ನನಗೆ", "ನಾನು", "ನನ್ನ", "ನಮ್ಮ", "ಮತ್ತು", "ಆದರೆ", "ಅಥವಾ", "ಅದು", "ಇದು",
+                # Malayalam incomplete grammatical fragments / pronoun fillers
+                "എനിക്ക്", "ഞാൻ", "എന്റെ", "ഞങ്ങളുടെ", "നമ്മുടെ", "ഉം", "പിന്നെ", "പക്ഷേ", "അല്ലെങ്കിൽ", "അത്", "ഇത്",
+                # Bengali incomplete grammatical fragments / pronoun fillers
+                "আমাকে", "আমি", "আমার", "আমাদের", "এবং", "কিন্তু", "বা", "অথবা", "ওটা", "এটা",
+                # Marathi incomplete grammatical fragments / pronoun fillers
+                "मला", "मी", "माझे", "माझा", "आमचे", "आपले", "आणि", "पण", "परंतु", "किंवा", "ते", "हे",
+                # English incomplete grammatical fragments / pronoun fillers
+                "i", "my", "me", "we", "our", "and", "but", "or", "of", "the", "a", "an", "to", "so", "it", "this", "that"
             }
             if normalized_text in fillers:
-                logger.info(f"Dropping noise/filler word: {text!r}")
+                logger.info(f"Dropping noise/filler/fragment word: {text!r}")
                 return
 
-            # Dynamic VAD Check: If VAD indicates user is silent and no speech was detected in this turn, drop it
-            if not getattr(self, "user_is_speaking", False) and not getattr(self, "speech_detected_in_current_turn", False):
-                logger.info(f"Dropping silence/hum transcription hallucination: {text!r}")
-                return
-            
-            # Reset flag only if the user has finished speaking (VAD is inactive)
-            # This ensures multiple transcripts during a single continuous speech turn are all allowed.
-            if not getattr(self, "user_is_speaking", False):
-                self.speech_detected_in_current_turn = False
+
 
             # Language Mismatch Check
             if self.current_language != "en-IN":
@@ -793,8 +885,19 @@ class UserTranscriptInterceptor(FrameProcessor):
                 if normalized_text in noise_hallucinations:
                     logger.info(f"Dropping English silence hallucination: {text!r}")
                     return
+            # Dynamic VAD Check: If VAD indicates user is silent and no speech was detected in this turn, drop it
+            if not getattr(self, "user_is_speaking", False) and not getattr(self, "speech_detected_in_current_turn", False):
+                logger.info(f"Dropping silence/hum transcription hallucination: {text!r}")
+                return
+            
+            # Reset flag for the next turn
+            self.speech_detected_in_current_turn = False
 
             logger.info(f"User transcript: {text}")
+            
+            # Discard any queued/pending agent responses or TTS generation from previous turns
+            await self.push_frame(InterruptionFrame(), direction)
+            
             sess_id = self.get_session_id()
             asyncio.create_task(save_transcript(sess_id, "user", text))
 
@@ -830,11 +933,12 @@ class UserTranscriptInterceptor(FrameProcessor):
                 self.agent_interceptor.first_token_received = False
 
             # Check for user name
-            if not self.caller_name_saved:
-                m = _USER_NAME_RE.search(text)
-                if m:
-                    name = m.group(1).strip().title()
-                    self.caller_name_saved = True
+            m = _USER_NAME_RE.search(text)
+            if m:
+                name = m.group(1).strip()
+                name = re.sub(r"\s*(?:గారు|గారూ|జీ|जी|அவர்கள்)\b", "", name).strip().title()
+                if name != getattr(self, "caller_name", ""):
+                    self.caller_name = name
                     asyncio.create_task(persist_caller_name(sess_id, name))
             
             # Language switching detection
@@ -960,6 +1064,8 @@ class AgentTranscriptInterceptor(FrameProcessor):
         
         if isinstance(frame, TextFrame):
             self.current_agent_response.append(frame.text)
+            if self.user_interceptor:
+                self.user_interceptor.speech_detected_in_current_turn = False
             
             # Measure TTFT when the first token/text is received from LLM for this turn
             if not self.first_token_received and self.llm_start_time is not None:
@@ -1022,12 +1128,14 @@ class AgentTranscriptInterceptor(FrameProcessor):
                         logger.error(f"Error sending agent metrics: {e}")
 
                 # Check for agent echoing/saving name
-                if self.user_interceptor and not self.user_interceptor.caller_name_saved:
+                if self.user_interceptor:
                     m = _AGENT_NAME_RE.search(full_text) or _AGENT_ECHO_NAME_RE.match(full_text)
                     if m:
-                        name = m.group(1).strip().title()
-                        self.user_interceptor.caller_name_saved = True
-                        asyncio.create_task(persist_caller_name(sess_id, name))
+                        name = m.group(1).strip()
+                        name = re.sub(r"\s*(?:గారు|గారూ|జీ|जी|அவர்கள்)\b", "", name).strip().title()
+                        if name != getattr(self.user_interceptor, "caller_name", ""):
+                            self.user_interceptor.caller_name = name
+                            asyncio.create_task(persist_caller_name(sess_id, name))
 
             self.current_agent_response = []
             self.current_ttft = 0
@@ -1072,27 +1180,7 @@ async def _resolve_cartesia_voice():
     except Exception as e:
         logger.warning("Could not look up Cartesia voice: %s", e)
 
-@api_app.on_event("startup")
-async def startup_event():
-    await init_db()
-    await _resolve_cartesia_voice()
-    global db_pool
-    # Redact password for logging
-    safe_url = re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", DATABASE_URL or "")
-    logger.info("Attempting DB pool connection to: %s", safe_url[:120])
-    try:
-        db_pool = await asyncpg.create_pool(DATABASE_URL, statement_cache_size=0, min_size=1, max_size=5)
-        logger.info("PostgreSQL database pool initialized successfully")
-    except Exception as e:
-        logger.error("!! DB POOL FAILED !! %s: %s", type(e).__name__, e)
-        logger.warning("Running DATABASE-LESS. Transcripts, calls, and settings WILL NOT persist. Check DATABASE_URL_AIRA env var on Railway and that Supabase project is not paused.")
 
-@api_app.on_event("shutdown")
-async def shutdown_event():
-    global db_pool
-    if db_pool:
-        await db_pool.close()
-        logger.info("PostgreSQL database pool closed successfully")
 
 async def run_pipeline(websocket: WebSocket):
     # Setup custom serializer
@@ -1142,14 +1230,14 @@ async def run_pipeline(websocket: WebSocket):
             api_key=gemini_key or "dummy_key",
             settings=GoogleLLMService.Settings(
                 model=gemini_model,
-                max_tokens=120,
+                max_tokens=250,
                 temperature=0.6
             )
         )
         masked_key = f"{gemini_key[:6]}...{gemini_key[-4:]}" if len(gemini_key) > 10 else "None"
-        logger.info(f"LLM provider initialized: Google Gemini ({gemini_model}, max_tokens=120) | Active Key: {masked_key}")
+        logger.info(f"LLM provider initialized: Google Gemini ({gemini_model}, max_tokens=250) | Active Key: {masked_key}")
     else:
-        # Cap responses at ~120 tokens for short, tight replies (per prompt: 2-4 sentences)
+        # Cap responses at ~250 tokens for short, tight replies (per prompt: 2-4 sentences)
         llm_kwargs = {
             "api_key": groq_key or "dummy_key",
             "model": "llama-3.1-8b-instant",
@@ -1157,11 +1245,11 @@ async def run_pipeline(websocket: WebSocket):
         try:
             from pipecat.services.groq.llm import GroqLLMService as _GLS
             if hasattr(_GLS, "InputParams"):
-                llm_kwargs["params"] = _GLS.InputParams(max_tokens=120, temperature=0.6)
+                llm_kwargs["params"] = _GLS.InputParams(max_tokens=250, temperature=0.6)
         except Exception:
             pass
         llm = GroqLLMService(**llm_kwargs)
-        logger.info("LLM provider initialized: Groq (llama-3.1-8b-instant, max_tokens=120)")
+        logger.info("LLM provider initialized: Groq (llama-3.1-8b-instant, max_tokens=250)")
     
     sarvam_key = os.getenv("SARVAM_API_KEY_AIRA", "") or os.getenv("SARVAM_API_KEY", "")
     tts = SarvamTTSService(
@@ -1214,12 +1302,12 @@ async def run_pipeline(websocket: WebSocket):
         try:
             vad_params = VADParams(
                 confidence=0.85,      # stricter confidence to filter out background speech
-                start_secs=0.35,      # require 350ms to verify it's actual speech
+                start_secs=0.20,      # require 200ms to verify it's actual speech
                 stop_secs=1.2,        # 1.2s of silence to stop (prevents cutting off half-words)
-                min_volume=0.25,      # reject background chatter/noise (0.25 is good for direct mouth-mic and normal voice)
+                min_volume=0.10,      # capture quiet regional speech and ignore background static/distant chatter
             )
             vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=vad_params))
-            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.35, stop_secs=1.2, min_volume=0.25)")
+            logger.info("Silero VAD initialized (confidence=0.85, start_secs=0.20, stop_secs=1.2, min_volume=0.10)")
         except Exception as e:
             logger.warning(f"Could not instantiate Silero VAD: {e}")
             vad = None
@@ -1287,10 +1375,10 @@ async def run_pipeline(websocket: WebSocket):
                             await params.result_callback(joined)
                             return
                             
-            await params.result_callback("No relevant information found. Tell the caller you'll get someone to follow up.")
+            await params.result_callback("No relevant information found in knowledge base. Politely inform the caller in their active language: 'I don't know about it, if you want the team to connect you back tell me, I will do that for you.'")
         except Exception as e:
             logger.error(f"KB search failed: {e}")
-            await params.result_callback("Knowledge base unavailable. Tell the caller you'll get someone to call them back.")
+            await params.result_callback("Knowledge base is currently offline. Politely inform the caller in their active language: 'I don't know about it, if you want the team to connect you back tell me, I will do that for you.'")
 
 
     async def hang_up(params: FunctionCallParams):
@@ -1385,7 +1473,7 @@ async def run_pipeline(websocket: WebSocket):
         user_interceptor.current_system_prompt = system_prompt
         user_interceptor.current_language = default_language
         user_interceptor.language_locked = True
-        user_interceptor.caller_name_saved = False
+        user_interceptor.caller_name = ""
 
         # Register mid-call prompt refresh callback for this session
         async def _refresh_prompt(new_settings: dict):
