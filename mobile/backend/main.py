@@ -881,14 +881,14 @@ class UserTranscriptInterceptor(FrameProcessor):
 
                 # Push a confirmation message bypass LLM
                 confirmations = {
-                    "hi-IN": "Sure, switching to Hindi now!",
-                    "te-IN": "Sure, switching to Telugu now!",
-                    "ta-IN": "Sure, switching to Tamil now!",
-                    "kn-IN": "Sure, switching to Kannada now!",
-                    "ml-IN": "Sure, switching to Malayalam now!",
-                    "en-IN": "Sure, switching to English now!"
+                    "hi-IN": "बताइए, आज मैं आपकी कैसे help कर सकता हूँ?",
+                    "te-IN": "చెప్పండి, ఈరోజు నేను మీకు ఎలా help చేయగలను?",
+                    "ta-IN": "சொல்லுங்க, இன்னைக்கு நான் உங்களுக்கு என்ன help பண்ணட்டும்?",
+                    "kn-IN": "ಹೇಳಿ, ಇವತ್ತು ನಾನು ನಿಮಗೆ ಹೇಗೆ help ಮಾಡಬಹುದು?",
+                    "ml-IN": "പറയൂ, ഇന്ന് ഞാൻ നിങ്ങൾക്ക് എങ്ങനെയാണ് help ചെയ്യേണ്ടത്?",
+                    "en-IN": "How can I help you today?"
                 }
-                phrase = confirmations.get(detected, "Switching language now.")
+                phrase = confirmations.get(detected, "How can I help you today?")
                 if self.task:
                     asyncio.create_task(self.task.queue_frames([TTSSpeakFrame(text=phrase, append_to_context=False)]))
                     
@@ -1268,8 +1268,18 @@ async def run_pipeline(websocket: WebSocket):
 
     async def hang_up(params: FunctionCallParams):
         """End the phone call. Call this ONLY when the caller explicitly says goodbye, bye, wants to hang up, or asks to end the call."""
+        lang = user_interceptor.current_language if hasattr(user_interceptor, "current_language") else "en-IN"
+        goodbyes = {
+            "en-IN": "Goodbye! Have a wonderful day!",
+            "te-IN": "సరేనండి, సెలవు! మీ రోజు చాలా బాగుండాలని కోరుకుంటున్నాను!",
+            "hi-IN": "अलविदा! आपका दिन शुभ हो!",
+            "ta-IN": "சரிங்க, பாய்! இந்த நாள் உங்களுக்கு நல்லா இருக்கட்டும்!",
+            "kn-IN": "ಹೋಗಿ ಬರ್ತೀನಿ! ನಿಮ್ಮ ದಿನ ಒಳ್ಳೆಯದಾಗಿರಲಿ!",
+            "ml-IN": "പോയി വരാം! നല്ലൊരു ദിവസം ആശംസിക്കുന്നു!"
+        }
+        goodbye_text = goodbyes.get(lang, "Goodbye! Have a wonderful day!")
         await task.queue_frames([
-            TTSSpeakFrame(text="Goodbye! Have a wonderful day!", append_to_context=False),
+            TTSSpeakFrame(text=goodbye_text, append_to_context=False),
             EndFrame()
         ])
         await params.result_callback("Call ended.")
@@ -1392,8 +1402,38 @@ async def run_pipeline(websocket: WebSocket):
 
         _session_prompt_updaters[session_id] = _refresh_prompt
 
-        # Play predefined English greeting first so LLM starts call naturally
-        greeting = f"Hi, I am {agent_name} from {business_name_val}. Which language do you want to speak?"
+        # Update TTS and STT settings to use the selected default language on startup
+        if tts:
+            try:
+                await tts._update_settings(tts.Settings(language=default_language))
+                logger.info(f"TTS language initialized to default: {default_language}")
+            except Exception as e:
+                logger.error(f"Failed to update TTS language setting at startup: {e}")
+                
+        if stt:
+            try:
+                from pipecat.transcriptions.language import Language
+                lang_enum = None
+                for l in Language:
+                    if l.value == default_language:
+                        lang_enum = l
+                        break
+                if lang_enum:
+                    await stt._update_settings(stt.Settings(language=lang_enum))
+                    logger.info(f"STT language initialized to default: {default_language} ({lang_enum})")
+            except Exception as e:
+                logger.error(f"Failed to update STT language setting at startup: {e}")
+
+        # Play predefined greeting first in the chosen default language so LLM starts call naturally
+        greetings = {
+            "en-IN": f"Hi, I am {agent_name} from {business_name_val}. Which language do you want to speak?",
+            "te-IN": f"నమస్కారం, నేను {business_name_val} నుండి {agent_name} ని. మీరు ఏ భాషలో మాట్లాడాలనుకుంటున్నారు?",
+            "hi-IN": f"नमस्ते, मैं {business_name_val} से {agent_name} हूँ। आप किस भाषा में बात करना चाहते हैं?",
+            "ta-IN": f"வணக்கம், நான் {business_name_val}-லிருந்து {agent_name} பேசறேன். நீங்க எந்த மொழியில பேச விரும்புறீங்க?",
+            "kn-IN": f"ನಮಸ್ಕಾರ, ನಾನು {business_name_val} ಇಂದ {agent_name}. ನೀವು ಯಾವ ಭಾಷೆಯಲ್ಲಿ ಮಾತನಾಡಲು ಬಯಸುತ್ತೀರಿ?",
+            "ml-IN": f"നമസ്കാരം, ഞാൻ {business_name_val}-ൽ നിന്ന് {agent_name} ആണ്. നിങ്ങൾക്ക് ഏത് ഭാഷയിലാണ് സംസാരിക്കേണ്ടത്?"
+        }
+        greeting = greetings.get(default_language, greetings["en-IN"])
         await task.queue_frames([TTSSpeakFrame(text=greeting, append_to_context=True)])
 
     call_ended_triggered = False
