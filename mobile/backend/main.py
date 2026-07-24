@@ -314,7 +314,7 @@ async def get_transcripts(session_id: str):
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT speaker, message, created_at 
+                SELECT speaker, message, message_en, created_at 
                 FROM transcripts 
                 WHERE session_id = $1 
                 ORDER BY id
@@ -322,6 +322,7 @@ async def get_transcripts(session_id: str):
             return [{
                 "speaker": r['speaker'],
                 "message": r['message'],
+                "message_en": r['message_en'] or r['message'],
                 "created_at": r['created_at'].isoformat() if r['created_at'] else None
             } for r in rows]
     except Exception as e:
@@ -358,9 +359,11 @@ async def init_db():
                 session_id  VARCHAR(64) NOT NULL REFERENCES call_logs(session_id) ON DELETE CASCADE,
                 speaker     VARCHAR(16) NOT NULL,
                 message     TEXT NOT NULL,
+                message_en  TEXT,
                 created_at  TIMESTAMPTZ DEFAULT NOW()
             );
         """)
+        await conn.execute("ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS message_en TEXT;")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts(session_id);")
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS agent_settings (
@@ -443,16 +446,40 @@ async def persist_caller_name(session_id: str, name: str) -> None:
     except Exception as e:
         logger.warning("Failed to save caller name in DB: %s", e)
 
+async def translate_to_english(text: str) -> str:
+    # If text is empty or already pure ASCII/English, return as-is
+    if not text or all(ord(c) < 128 for c in text):
+        return text
+    api_key = os.getenv("GOOGLE_API_KEY_AIRA", "") or os.getenv("GEMINI_API_KEY_AIRA", "") or os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        return text
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=gemini_model,
+            contents=f"Translate the following text to English. Respond ONLY with the direct translation, do not add quotes, notes or markdown:\n\n{text}"
+        )
+        translated = response.text.strip() if response.text else ""
+        return translated if translated else text
+    except Exception as e:
+        logger.warning(f"Failed to translate transcript: {e}")
+        return text
+
 async def save_transcript(session_id: str, speaker: str, message: str) -> None:
     if not db_pool:
         logger.warning("DB offline - cannot save transcript for session: %s (speaker=%s)", session_id, speaker)
         return
     try:
+        # Translate to English asynchronously
+        message_en = await translate_to_english(message)
         async with db_pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO transcripts (session_id, speaker, message)
-                VALUES ($1, $2, $3)
-            """, session_id, speaker, message)
+                INSERT INTO transcripts (session_id, speaker, message, message_en)
+                VALUES ($1, $2, $3, $4)
+            """, session_id, speaker, message, message_en)
     except Exception as e:
         logger.warning("Failed to save transcript in DB: %s", e)
 
@@ -1141,13 +1168,13 @@ async def run_pipeline(websocket: WebSocket):
         api_key=sarvam_key,
         settings=SarvamTTSService.Settings(
             model="bulbul:v3",
-            voice="shubh",
+            voice="simran",
             language="en-IN",
             enable_preprocessing=True
         ),
         sample_rate=16000
     )
-    logger.info("TTS provider initialized: Sarvam TTS (bulbul:v3, voice_id=shubh)")
+    logger.info("TTS provider initialized: Sarvam TTS (bulbul:v3, voice_id=simran)")
 
     # Configure Context and Aggregators
     from pipecat.adapters.schemas.function_schema import FunctionSchema
